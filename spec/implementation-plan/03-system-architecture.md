@@ -820,6 +820,44 @@ GeneratedOutput
 persist locally
 ```
 
+### AssetUnderstanding: eager and parallel
+
+**Rule: AssetUnderstanding must never be computed serially at Create
+My Story time.**
+
+The correct strategy is two-phase:
+
+**Phase 1 — eager analysis (at Moment add time):**
+
+``` text
+addMoment() or shootMoment()
+→ dispatch AssetUnderstanding for that Moment immediately
+→ store result locally; mark Moment as analyzed
+```
+
+Each Moment is analyzed when it arrives, not when the user taps Create.
+By Create time, all cached results are already available.
+
+**Phase 2 — gap fill (at Create My Story, concurrent):**
+
+If any Moments were added while analysis was offline or failed, analyze
+the missing ones before proceeding. All missing Moments must be analyzed
+**concurrently** — fan out Bedrock calls in parallel, not sequentially.
+
+``` text
+Create My Story triggered
+→ identify Moments without AssetUnderstanding
+→ fan out Bedrock calls concurrently (asyncio.gather / concurrent.futures)
+→ await all results
+→ proceed to Story reconciliation
+```
+
+Serializing Bedrock calls (one Moment at a time) is a correctness
+violation, not just a performance issue: 10 uncached Moments analyzed
+serially at ~8s each exceeds the App Runner 120s timeout. Concurrent
+calls bound total analysis time to the slowest single call (~8s)
+regardless of Moment count.
+
 `Create My Story` never changes `Story.status`.
 
 ## 30. Complete / Reopen Story
@@ -1371,6 +1409,35 @@ analyze asset once
 ```
 
 over repeatedly resending originals.
+
+### Parallel Bedrock calls (required, not optional)
+
+When multiple independent AI calls can be made concurrently, they
+**must** be fanned out in parallel. This is a hard requirement, not an
+optimization.
+
+The primary case is AssetUnderstanding at Create My Story time:
+
+``` text
+# Wrong — serial, O(N × latency), will timeout at scale
+for moment in moments:
+    result = await bedrock.analyze(moment)
+
+# Correct — concurrent, O(max single latency), bounded regardless of N
+results = await asyncio.gather(*[bedrock.analyze(m) for m in moments])
+```
+
+Other cases where parallelism applies:
+
+- Analyzing a batch of imported Existing Media assets
+- Running Asset Engine and Music Engine independently before Edit
+  planning (no data dependency between them)
+- Any set of Bedrock calls where result B does not depend on result A
+
+Do not introduce serial dependencies between independent AI calls.
+When a dependency genuinely exists (Edit Engine needs AssetUnderstanding
+results), the serial ordering is correct — but verify the dependency is
+real before serializing.
 
 ## 47. Future Large-Library Path
 
