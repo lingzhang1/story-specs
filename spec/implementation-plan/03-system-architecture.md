@@ -1,342 +1,1661 @@
-# Story — System Architecture
+# Story --- System Architecture
 
-**Status:** MVP decisions frozen  
-**Complements:** `mvp-build-plan.md`, `02-core-story-schema.md`  
-**Purpose:** Lock the deployment, language, and infrastructure decisions before deep implementation begins. This document answers every decision listed in `mvp-build-plan.md § 3`.
+**Document:** `03-system-architecture.md`\
+**Status:** MVP v0.2 --- AWS Architecture Baseline\
+**Related specs:** `story-production.md`, `mvp-build-plan.md`,
+`02-core-story-schema.md`, `04-aws-infrastructure.md`
 
----
+## 1. Purpose
 
-## 1. Summary of Decisions
+This document defines where Story code and state live, how components
+communicate, how media is handled, and which boundaries Kiro must
+preserve.
 
-| Decision | Choice |
-|---|---|
-| iOS technology | Swift / SwiftUI |
-| Backend language | Python 3.12 |
-| Infrastructure-as-code | AWS CDK (TypeScript) |
-| API layer | AWS App Runner (always-on, supports streaming) |
-| Async / render jobs | Amazon SQS + AWS Lambda (Fargate for Media Engine if needed) |
-| Media storage | Amazon S3 |
-| Server-side persistence | Amazon DynamoDB |
-| Secrets | AWS Secrets Manager |
-| Observability | Amazon CloudWatch + structured JSON logging |
-| Model access | AWS Bedrock (primary) + direct provider APIs via Model Gateway |
-| Monorepo tooling | Turborepo (JS/TS packages) + Hatch / uv (Python packages) |
-| API protocol | HTTPS / REST + JSON; streaming responses via SSE |
-| Local vs cloud ownership | iOS owns originals; cloud owns reasoning, processing, outputs |
-| Development / staging | CDK environments (dev / prod stacks, `.env` per environment) |
-| Mock vs production engines | Interface-stable mock engines for Milestone A; real engines swapped in per milestone |
+Story's product goal is to help users **plan, guide, manage, and create
+visual stories**.
 
----
+Product behavior belongs in `story-production.md`; domain semantics
+belong in `02-core-story-schema.md`; implementation sequence belongs in
+`mvp-build-plan.md`.
 
-## 2. Monorepo Structure
+## 2. Core Architecture Principles
 
-```text
+1.  **Cloud thinks; device owns media.** Cloud AI handles creative
+    reasoning. Original media, playback, local Story state, and MVP
+    rendering remain on-device.
+2.  **Local-first, not offline-only.** Stories and media survive locally
+    without an account; intelligence may require network access.
+3.  **One modular backend.** Story Engine, Director Engine, Asset
+    Engine, Music Engine, Edit Engine, and Model Gateway are modules,
+    not MVP microservices.
+4.  **Structured state over giant agents.** AI transforms explicit
+    domain objects into explicit domain objects; persistent state is not
+    hidden in model chat history.
+5.  **AI decides; deterministic systems execute.** AI creates plans such
+    as `StoryPlan` and `EditPlan`; deterministic code performs
+    capture/media operations.
+6.  **Interfaces before implementations.** Every intelligence component
+    has mock and real implementations so Milestone A can work without
+    production AI.
+7.  **Minimize media transfer.** Upload only resized images, sampled
+    frames, short proxies, or other representations actually required
+    for a task.
+8.  **No mandatory account.** MVP uses a local anonymous identity.
+9.  **AWS is the deployment platform.** Cloud infrastructure is
+    provisioned with AWS CDK written in TypeScript. Application/domain
+    code must remain independent of CDK.
+10. **Language boundaries follow responsibilities.** Consumer iOS
+    remains Swift; backend and AI engines use Python; infrastructure
+    uses TypeScript.
+
+## 3. System Context
+
+``` text
+                         STORY iOS APP
+              ┌────────────────────────────┐
+              │ SwiftUI                    │
+              │ Camera / Photos            │
+              │ SwiftData                  │
+              │ Original media             │
+              │ Playback                   │
+              │ On-device Media Engine     │
+              └──────────────┬─────────────┘
+                             │ HTTPS / JSON
+                             ▼
+                    ┌─────────────────┐
+                    │    Story API    │
+                    │ orchestration   │
+                    │ validation      │
+                    │ temp uploads    │
+                    └────────┬────────┘
+                             │
+          ┌──────────────────┼──────────────────┐
+          ▼                  ▼                  ▼
+   Story Engine       Director Engine      Edit Engine
+          │                  │                  │
+          ├────────────┬─────┴──────┬──────────┘
+          ▼            ▼            ▼
+    Asset Engine   Music Engine  Model Gateway
+                                     │
+                                     ▼
+                                  AI Models
+
+              EditPlan returned to iPhone
+                             │
+                             ▼
+                  On-device AVFoundation
+                             │
+                             ▼
+                    GeneratedOutput
+```
+
+## 4. Repository Structure
+
+``` text
 story/
 ├── apps/
-│   ├── ios/                         # Swift/SwiftUI iPhone app (Xcode project)
-│   └── api/                         # Python backend (FastAPI, entry point for App Runner)
-│
+│   ├── ios/                         # Production native iPhone app — Swift
+│   └── api/                         # Python API/orchestration application
 ├── packages/
-│   ├── contracts/                   # Shared API/domain contracts (TypeScript types + JSON Schema)
-│   ├── story-engine/                # Python: persistent Story reasoning
-│   ├── director-engine/             # Python: scene → concept → shot plan
-│   ├── asset-engine/                # Python: photo/video understanding
-│   ├── edit-engine/                 # Python: Moments → EditPlan
-│   ├── music-engine/                # Python: music recommendation / analysis
-│   ├── media-engine/                # Python: deterministic rendering (FFmpeg)
-│   ├── model-gateway/               # Python: AI provider abstraction
-│   └── observability/               # Python: structured logging, traces
-│
-├── services/
-│   └── worker/                      # Python: SQS consumer for async render jobs
-│
-├── infra/                           # AWS CDK app (TypeScript)
-│   ├── bin/
-│   │   └── story.ts                 # CDK entrypoint
-│   └── lib/
-│       ├── api-stack.ts             # App Runner service, DynamoDB, Secrets
-│       ├── storage-stack.ts         # S3 buckets, bucket policies
-│       ├── worker-stack.ts          # SQS queue + Lambda / Fargate worker
-│       └── observability-stack.ts   # CloudWatch dashboards, alarms
-│
+│   ├── story_engine/                # Python
+│   ├── director_engine/             # Python
+│   ├── asset_engine/                # Python
+│   ├── music_engine/                # Python
+│   ├── edit_engine/                 # Python
+│   ├── model_gateway/               # Python
+│   └── observability/               # Python
+├── infrastructure/
+│   └── cdk/                         # AWS CDK — TypeScript
+│       ├── bin/
+│       ├── lib/
+│       │   ├── stacks/
+│       │   └── constructs/
+│       └── test/
+├── contracts/
+│   ├── schemas/                     # Language-neutral JSON Schemas
+│   └── openapi/
 ├── prototypes/
-│   └── story-figma/                 # Frozen Figma HTML prototype (reference only)
-│
-├── specs/                           # All spec documents
-├── evals/                           # Model evaluation harnesses
-└── scripts/                         # Dev / CI helper scripts
+│   └── figma/                       # Frozen Figma HTML, reference only
+├── specs/
+│   ├── story-production.md
+│   ├── mvp-build-plan.md
+│   ├── 02-core-story-schema.md
+│   ├── 03-system-architecture.md
+│   └── 04-aws-infrastructure.md
+├── evals/
+│   ├── director/
+│   ├── scene-understanding/
+│   ├── asset-selection/
+│   └── editing/
+└── scripts/
 ```
 
-Production code must not import from `prototypes/`.
+`apps/ios` is the native consumer application. `apps/api` and the engine
+packages are Python. `infrastructure/cdk` is TypeScript and contains
+deployment definitions only. `contracts/` is language-neutral.
 
----
+The Swift app never imports backend packages. Python application code
+never imports CDK code. CDK deploys application artifacts but does not
+define Story domain behavior.
 
-## 3. iOS Application
+## 5. Figma Prototype Boundary
 
-- **Language:** Swift 5.10+
-- **UI framework:** SwiftUI
-- **Local persistence:** SwiftData (preferred) or Core Data — chosen at Milestone A
-- **Media references:** local file URLs only; originals never leave the device by default
-- **Uploads:** iOS generates a presigned S3 URL via the API; uploads directly to S3 over HTTPS; sends the S3 object key back to the API for processing
-- **Networking:** `URLSession` + async/await; SSE for streaming AI responses
-- **Camera / Photos:** `AVFoundation` (capture), `PhotosUI` (picker)
+Store Figma-generated HTML in `prototypes/figma/`.
 
-### iOS owns
+It is a UX, interaction, and visual reference. It is **not production
+frontend code** and production code must not depend on it.
 
-- UI and navigation
-- Camera capture and Photos integration
-- Original local media (never uploaded automatically)
-- Local Story persistence (all Story/Moment/CaptureSession state)
-- Thumbnails and proxies (generated on device)
-- Playback of local and downloaded GeneratedOutputs
-- Permissions (camera, photo library, microphone)
-- Lightweight client state (current screen, in-progress capture)
+Add `prototypes/figma/README.md` stating:
 
----
+``` text
+This directory contains the frozen Figma prototype and generated web code.
+It is a UX and interaction reference for the production Story application.
+Production code must not import from or depend on this directory.
+The production iOS interface is implemented natively.
+```
 
-## 4. Backend — Story API
+## 6. Technology Baseline
 
-- **Language:** Python 3.12
-- **Framework:** FastAPI
-- **Deployment:** AWS App Runner
-  - Always-on (no cold starts); supports SSE streaming responses
-  - Auto-scales based on request concurrency
-  - Pulls image from Amazon ECR on deploy
-- **API protocol:** HTTPS REST + JSON
-- **Streaming:** Server-Sent Events (SSE) for Director Engine responses and long AI calls
-- **Auth:** Anonymous device identity (`LocalIdentity.deviceId`) for MVP; no accounts required
+### iOS consumer app
 
-### Why App Runner over Lambda for the API
+-   Language: Swift
+-   UI: SwiftUI
+-   Camera: AVFoundation
+-   Photo library: PhotoKit / PhotosPicker
+-   Playback: AVKit
+-   Rendering/export: AVFoundation
+-   Concurrency: Swift Concurrency
+-   Networking: URLSession
+-   Structured persistence: SwiftData
 
-Lambda + API Gateway can stream, but it adds configuration complexity (function URLs, response streaming flag, payload size limits). App Runner is a single container, easier to reason about locally and in staging, and has no 29-second API Gateway timeout. The API can be placed behind API Gateway later if needed.
+Choose the concrete minimum supported iOS version during project setup
+and record it in the repository.
 
-### Backend owns
+### Backend and AI engines
 
-- Orchestration across engines
-- Structured AI requests (via Model Gateway)
-- Model-provider access and retries
-- Story/Director reasoning requiring server AI
-- Temporary media processing coordination
-- Async job dispatch (SQS)
-- Edit planning
-- Server-side rendering coordination
+-   Language: Python
+-   API framework: FastAPI
+-   Validation/domain DTOs: Pydantic
+-   API description: OpenAPI
+-   Testing: pytest
+-   Packaging/dependency management: choose one Python project standard
+    at repository bootstrap and use it consistently
 
----
+Python owns API orchestration and the Story, Director, Asset, Music,
+Edit, and Model Gateway implementations.
 
-## 5. Persistence — Amazon DynamoDB
+### Infrastructure
 
-Single-table design with entity types for `Story`, `Moment`, `CaptureSession`, `GeneratedOutput`.
+-   Cloud: AWS
+-   Infrastructure as Code: AWS CDK
+-   CDK language: TypeScript
+-   Initial compute: AWS Lambda
+-   API ingress: Amazon API Gateway
+-   Temporary media: Amazon S3
+-   Small operational/job state when needed: Amazon DynamoDB
+-   Secrets: AWS Secrets Manager
+-   Logs/metrics: Amazon CloudWatch
+-   Permissions: AWS IAM
+-   AWS-native model access where appropriate: Amazon Bedrock
+-   Async expansion when required: Amazon SQS + Lambda
+-   Heavy/long-running compute later when required: Amazon ECS/Fargate
+    or AWS Batch
 
-- **Partition key:** `entityId` (e.g., `STORY#<storyId>`)
-- **Sort key:** `sk` (e.g., `META`, `MOMENT#<momentId>`)
-- **Access patterns:** get Story by id, list Moments by Story, list GeneratedOutputs by Story
-- **TTL:** on temporary processing records (SceneUnderstanding, transient state)
+The backend must not depend directly on Lambda event shapes. AWS
+adapters translate infrastructure events into application-level requests
+so engines remain portable and testable.
 
-DynamoDB suits the document-shaped Story model and scales to zero between uses (cost-efficient for MVP).
+## 7. Contracts
 
-> **If relational access patterns emerge** (cross-Story queries, analytics), add Amazon Aurora Serverless v2 then. Do not add it preemptively.
+`02-core-story-schema.md` defines semantic meaning.
 
----
+Machine-readable wire contracts live under:
 
-## 6. Media Storage — Amazon S3
+``` text
+contracts/
+├── schemas/
+│   ├── story.schema.json
+│   ├── creative-intent.schema.json
+│   ├── moment.schema.json
+│   ├── scene-understanding.schema.json
+│   ├── story-concept.schema.json
+│   ├── story-plan.schema.json
+│   ├── asset-understanding.schema.json
+│   ├── music.schema.json
+│   ├── edit-plan.schema.json
+│   └── generated-output.schema.json
+└── openapi/
+    └── story-api.yaml
+```
 
-Two buckets:
+Generate or map these into Swift DTOs and Python/Pydantic DTOs.
 
-| Bucket | Purpose | Lifecycle |
+Keep three concepts distinct:
+
+``` text
+Domain model       = what a concept means
+API DTO            = what crosses the network
+Persistence model  = how it is stored locally
+```
+
+Do not put transport-specific fields into the canonical domain model.
+
+## 8. iOS Architecture
+
+Use feature-oriented organization:
+
+``` text
+apps/ios/Story/
+├── App/
+├── Features/
+│   ├── Home/
+│   ├── CreateNow/
+│   ├── StartStory/
+│   ├── StoryHome/
+│   ├── Moments/
+│   ├── StoryGuide/
+│   ├── StoryIdea/
+│   ├── Capture/
+│   ├── CreateStory/
+│   ├── Music/
+│   └── Output/
+├── Domain/
+│   ├── Models/
+│   └── UseCases/
+├── Data/
+│   ├── Persistence/
+│   ├── Repositories/
+│   └── API/
+├── Media/
+│   ├── Camera/
+│   ├── PhotoLibrary/
+│   ├── Proxy/
+│   ├── Playback/
+│   └── Rendering/
+├── DesignSystem/
+└── Support/
+```
+
+Feature UI owns rendering, interaction, navigation, and loading/error
+states.
+
+Domain/use-case code owns operations such as:
+
+``` text
+startStory()
+addMoment()
+shootMoment()
+createStoryOutput()
+completeStory()
+reopenStory()
+```
+
+Repositories abstract persistence and remote operations. Media modules
+own device-specific capture, Photos, proxy, playback, and rendering
+behavior.
+
+UI must not call model providers, database primitives, or AVFoundation
+rendering code directly.
+
+## 9. Local Identity
+
+On first launch, create an opaque `LocalIdentity` and persist it
+locally.
+
+No email, profile, or account is required.
+
+Future account linking must preserve existing Story IDs.
+
+## 10. Persistence and State Ownership
+
+For MVP, the device is authoritative for the user's persistent Story
+library.
+
+Persist locally:
+
+-   Story
+-   status
+-   CreativeIntent
+-   MusicDirection
+-   StoryBlueprint cache
+-   StoryState cache
+-   Moments
+-   local Asset references
+-   CaptureSession metadata
+-   retained StoryIdeas
+-   GeneratedOutput metadata
+-   output file references
+
+Use SwiftData for structured state.
+
+Do not store original media blobs in SwiftData.
+
+``` text
+SwiftData
+├── Story metadata
+├── Moments
+├── CaptureSession metadata
+├── AI-derived cached metadata
+└── GeneratedOutput metadata
+
+PhotoKit / filesystem
+├── original media
+├── app-captured media
+├── proxies
+├── thumbnails where needed
+└── generated videos
+```
+
+Cloud Story synchronization is deferred.
+
+## 11. Media Ownership
+
+Original media remains on-device by default.
+
+An Asset may resolve to:
+
+-   PhotoKit local identifier
+-   app-owned local file
+-   temporary cloud proxy
+-   generated local file
+
+Never design `Asset` as synonymous with a permanent cloud URL.
+
+## 12. Media Sent to AI
+
+Send the minimum representation required.
+
+### Photo
+
+``` text
+local original
+→ resize/compress locally
+→ temporary AI input
+```
+
+### Scene scan
+
+``` text
+3–5 second scan
+→ sample representative frames locally
+→ resize/compress
+→ Vision request
+→ SceneUnderstanding
+```
+
+### Existing video
+
+Prefer task-appropriate sampled frames, short low-resolution proxies,
+metadata, or selected ranges rather than the full original.
+
+## 13. Temporary Uploads
+
+When a provider requires cloud-accessible media:
+
+``` text
+iOS
+→ request temporary upload
+→ Story API returns signed target
+→ private temporary object storage
+→ AI processing
+→ structured derived result
+→ object expires/deletes
+```
+
+Requirements:
+
+-   private objects
+-   signed access
+-   opaque keys
+-   short retention
+-   automatic expiration
+-   no permanent original-media storage by default
+
+The domain is vendor-neutral.
+
+## 14. Story API
+
+The API is an orchestration boundary.
+
+It owns:
+
+-   validation
+-   anonymous request identity
+-   engine invocation
+-   provider secrets
+-   temporary upload coordination
+-   async job coordination when needed
+-   consistent errors
+-   observability
+
+It must expose Story-domain operations, not raw provider operations.
+
+Illustrative endpoint families:
+
+``` text
+POST /v1/creative-intent
+
+POST /v1/direct/scene-understanding
+POST /v1/direct/concepts
+POST /v1/direct/plan
+POST /v1/direct/validate
+
+POST /v1/stories/blueprint
+POST /v1/stories/guide
+POST /v1/stories/ideas
+POST /v1/stories/reconcile
+
+POST /v1/assets/analyze
+POST /v1/music/recommend
+POST /v1/edits/plan
+POST /v1/uploads
+```
+
+Exact endpoints may be refined with OpenAPI.
+
+Never expose a generic endpoint such as `/openai/chat`.
+
+All app/backend endpoints start under `/v1/`.
+
+## 15. Model Gateway
+
+All external AI access passes through Model Gateway.
+
+Conceptual interface:
+
+``` ts
+interface ModelGateway {
+  generateStructured<T>(request): Promise<T>
+  analyzeImages<T>(request): Promise<T>
+  analyzeVideoProxy<T>(request): Promise<T>
+  embed?(request): Promise<EmbeddingResult>
+}
+```
+
+Model Gateway owns:
+
+-   provider authentication
+-   SDK adaptation
+-   model routing
+-   structured-output enforcement
+-   timeout/retry behavior
+-   request IDs
+-   usage/cost/latency logging
+
+It does not own Story product reasoning.
+
+Model names are configuration, not domain constants.
+
+No provider API key is shipped in the iOS app.
+
+## 16. Story Engine
+
+Story Engine owns long-horizon Story reasoning.
+
+Inputs may include:
+
+``` text
+CreativeIntent
+StoryBlueprint
+StoryState
+Moment summaries
+AssetUnderstanding
+```
+
+Outputs may include:
+
+``` text
+StoryBlueprint
+Story Guide
+StoryIdea
+updated StoryState
+reconciliation decisions
+```
+
+It answers:
+
+> What would improve this Story overall?
+
+It does not direct the exact current camera setup.
+
+## 17. Director Engine
+
+Director Engine owns immediate scene-specific directing.
+
+Inputs:
+
+``` text
+CreativeIntent
+optional Story context
+optional StoryIdea
+SceneUnderstanding
+capture constraints
+```
+
+Outputs:
+
+``` text
+StoryConcept
+StoryPlan
+ShotPlan[]
+```
+
+It answers:
+
+> Given what the user wants and what is physically here, what should
+> they shoot now?
+
+Optimize for usefulness, scene specificity, feasibility, simplicity, and
+low capture burden.
+
+## 18. Asset Engine
+
+Asset Engine answers:
+
+> What is in this media and what parts are useful?
+
+It may produce:
+
+-   semantic description
+-   scene tags
+-   people/actions
+-   basic technical quality
+-   usable video ranges
+-   potential narrative roles
+-   future embeddings
+
+Implement only fields needed by MVP consumers.
+
+This boundary intentionally supports future large-library indexing
+without building that system now.
+
+## 19. Music Engine
+
+Music Engine owns:
+
+-   MusicDirection interpretation
+-   candidate-track recommendation
+-   track metadata
+-   BPM
+-   beats
+-   sections
+-   energy curve
+
+MVP uses a small curated licensing-safe catalog.
+
+Do not build Spotify, Apple Music, TikTok, or Instagram integrations.
+
+## 20. Edit Engine
+
+Edit Engine produces `EditPlan`.
+
+Inputs:
+
+``` text
+CreativeIntent
+StoryState
+Moments
+AssetUnderstanding
+MusicAsset
+MusicAnalysis
+output constraints
+```
+
+Output specifies:
+
+-   selected assets
+-   source ranges
+-   ordering
+-   duration
+-   crop/reframe intent
+-   speed
+-   simple transitions
+-   music
+-   cut timing
+-   narrative roles
+
+Edit Engine makes creative editing decisions but does not render media.
+
+## 21. Media Engine
+
+MVP Media Engine runs on-device using AVFoundation.
+
+Input:
+
+``` text
+EditPlan
++ local assets
++ music asset
+```
+
+Responsibilities:
+
+-   resolve local assets
+-   trim
+-   concatenate
+-   crop/reframe
+-   scale
+-   speed changes
+-   simple transitions
+-   music mixing
+-   basic audio handling
+-   export
+-   progress
+-   cancellation
+
+Output:
+
+``` text
+local MP4
+→ GeneratedOutput
+```
+
+The renderer is deterministic and contains no hidden AI creative
+reasoning.
+
+## 22. Why Rendering Is On-Device
+
+MVP renders on-device because:
+
+-   originals already live on the phone
+-   full-resolution upload is expensive and slow
+-   privacy is better
+-   AVFoundation supports required MVP operations
+-   final outputs can remain local
+-   it preserves local-first architecture
+
+Revisit server rendering only if required by advanced effects,
+generative media, cross-device workflows, or unsupported device
+capabilities.
+
+## 23. Mock Engine Strategy
+
+Milestone A uses real product infrastructure with mock intelligence.
+
+Define replaceable interfaces:
+
+``` text
+StoryEngine
+├── MockStoryEngine
+└── AIStoryEngine
+
+DirectorEngine
+├── MockDirectorEngine
+└── AIDirectorEngine
+
+AssetEngine
+├── MockAssetEngine
+└── AIAssetEngine
+
+MusicEngine
+├── MockMusicEngine
+└── RealMusicEngine
+
+EditEngine
+├── MockEditEngine
+└── AIEditEngine
+```
+
+The UI must not know which implementation produced a result.
+
+## 24. Create Now Flow
+
+``` text
+Create Now
+→ template/reference/description
+→ Story API
+→ CreativeIntent
+→ optional local scene scan
+→ sampled frames
+→ SceneUnderstanding
+→ Director Engine
+→ StoryConcept + StoryPlan
+→ iOS guided capture
+→ local Asset/Capture
+→ optional validation
+→ Music + Edit planning
+→ EditPlan
+→ on-device Media Engine
+→ GeneratedOutput
+```
+
+## 25. Start a Story Flow
+
+``` text
+Start a Story
+→ Creative Direction
+→ CreativeIntent
+→ Story Engine
+→ StoryBlueprint
+→ persist Story locally
+→ Story Home
+```
+
+A Story exists before it has Moments or generated outputs.
+
+## 26. Add Existing Media Flow
+
+``` text
+Story Home
+→ Add photos/videos
+→ PhotosPicker
+→ local Asset references
+→ Moment[]
+→ persist locally
+→ optional/progressive AssetUnderstanding
+→ update StoryState
+```
+
+Adding media does not automatically generate an output.
+
+## 27. Shoot a Moment Flow
+
+``` text
+Story
+→ Shoot a Moment
+→ load CreativeIntent + StoryState
+→ optionally scan current scene
+→ SceneUnderstanding
+→ Director Engine
+→ StoryConcept + StoryPlan
+→ guided local capture
+→ Asset
+→ Moment
+→ persist locally
+→ update StoryState
+```
+
+## 28. Story Idea → Show Me
+
+``` text
+Story Engine
+→ StoryIdea
+→ user taps Show Me
+→ current SceneUnderstanding
+→ Director Engine receives:
+     StoryIdea
+     CreativeIntent
+     StoryState
+     SceneUnderstanding
+→ scene-specific StoryConcept
+→ StoryPlan
+→ capture
+→ Moment
+```
+
+Story Idea is long-horizon reasoning; Show Me converts it into
+scene-specific direction.
+
+## 29. Create My Story Flow
+
+``` text
+Story
+├── CreativeIntent
+├── StoryState
+├── Moments
+└── MusicDirection
+       ↓
+ensure required AssetUnderstanding
+       ↓
+Story reconciliation
+       ↓
+Music Engine
+       ↓
+MusicAsset + MusicAnalysis
+       ↓
+Edit Engine
+       ↓
+EditPlan
+       ↓
+return to iOS
+       ↓
+resolve local originals
+       ↓
+on-device Media Engine
+       ↓
+local MP4
+       ↓
+GeneratedOutput
+       ↓
+persist locally
+```
+
+`Create My Story` never changes `Story.status`.
+
+## 30. Complete / Reopen Story
+
+These are local-first lifecycle operations:
+
+``` text
+completeStory()
+active → completed
+
+reopenStory()
+completed → active
+```
+
+They do not render or generate anything.
+
+## 31. Async Work
+
+Use synchronous requests for operations expected to finish
+interactively:
+
+-   CreativeIntent
+-   small scene analysis
+-   StoryConcept
+-   StoryPlan
+-   StoryIdea
+
+Use async jobs only when a workload cannot reliably complete
+interactively, such as future long video analysis, batch processing,
+server rendering, or generative media.
+
+Reserved job states:
+
+``` text
+queued
+running
+succeeded
+failed
+cancelled
+```
+
+Do not introduce a queue until measured workload requires one.
+
+## 32. Offline Behavior
+
+Available offline:
+
+-   Home
+-   local Stories
+-   Story Home
+-   Moments browsing
+-   output playback
+-   camera capture
+-   add local media
+-   Complete/Reopen
+-   cached Story Guide
+-   local rendering when an EditPlan already exists
+
+Requires network in MVP:
+
+-   new model-backed CreativeIntent processing
+-   scene understanding
+-   new Story Ideas
+-   AI Director
+-   cloud AssetUnderstanding
+-   new AI EditPlan
+-   model-backed music recommendation when applicable
+
+Network failure must never lose captured media.
+
+## 33. Failure Handling
+
+-   Scene analysis failure: retry or use a simpler fallback where the UX
+    supports it.
+-   Validation service failure: keep the captured clip.
+-   Edit planning failure: keep all Moments and allow retry.
+-   Rendering failure: keep EditPlan and source assets and allow retry.
+-   Temporary upload failure: original local media remains untouched.
+
+Never force a retake because the backend failed.
+
+## 34. IDs and Idempotency
+
+Use opaque UUIDs for domain IDs.
+
+Prefer client-generated IDs for local-first objects where practical.
+
+Retryable create operations should support idempotency.
+
+Do not encode user data or semantics into IDs.
+
+## 35. Privacy and Security
+
+MVP baseline:
+
+-   HTTPS only
+-   provider secrets backend-only
+-   no AI provider keys in the iOS bundle
+-   private signed temporary media access
+-   automatic temporary-media expiration
+-   original media local by default
+-   no raw media in logs
+-   avoid unnecessary raw user text in logs
+-   validate media type and request size
+-   opaque IDs
+
+Before external beta, perform a provider-by-provider privacy review for
+any service receiving user media.
+
+## 36. Data Minimization
+
+For each model request, ask:
+
+> What is the minimum data required for this task?
+
+Examples:
+
+``` text
+Scene direction:
+3–8 representative frames
+not the entire 4K source video
+
+Story Idea:
+Moment summaries + StoryState
+not all originals
+
+Edit planning:
+AssetUnderstanding + usable ranges + thumbnails
+not full-resolution originals
+```
+
+## 37. Observability
+
+Backend requests receive correlation IDs.
+
+For AI operations record:
+
+-   operation
+-   provider/model
+-   latency
+-   success/failure
+-   retries
+-   structured-output validation failures
+-   usage/cost when available
+
+Useful non-sensitive product events include:
+
+``` text
+story_started
+moment_added
+shoot_moment_started
+story_idea_shown
+story_idea_used
+shot_accepted
+shot_retaken
+create_story_started
+create_story_succeeded
+story_completed
+story_reopened
+```
+
+Analytics is not a Milestone A blocker.
+
+## 37a. OPS and Metrics
+
+This section defines the operational signals, alarms, and runbook
+triggers required to detect and respond to production issues.
+
+### Request health
+
+| Metric | Alarm threshold | Action |
 |---|---|---|
-| `story-media-uploads` | Temporary: iOS upload landing zone, processing inputs | 7-day TTL on all objects |
-| `story-media-outputs` | Persistent: GeneratedOutput MP4s, thumbnails | Retained; user-deletable |
+| App Runner 5xx rate | > 1% over 5 min | Page on-call; check CloudWatch logs for stack traces |
+| App Runner 4xx rate | > 5% over 5 min | Investigate; often client/schema mismatch |
+| App Runner request latency p95 | > 30s | Investigate AI call bottleneck; check Bedrock latency |
+| App Runner request latency p99 | > 90s | Critical — approaching 120s timeout; parallelize or async |
+| App Runner timeout errors (502/504) | Any | Immediate — requests hitting 120s wall; move operation to async |
 
-- iOS uploads via presigned URL (5-minute expiry); no AWS credentials on device
-- Media Engine writes GeneratedOutputs to `story-media-outputs`
-- Presigned download URLs for GeneratedOutput delivery to iOS
-- CORS configured for direct iOS upload/download
+The 120-second App Runner request timeout is a hard ceiling. When p99
+latency approaches 90 seconds, the operation must be moved to the async
+worker path before it begins returning 502s to iOS clients.
 
----
+### AI / Model Gateway
 
-## 7. Async Jobs — SQS + Lambda (Worker)
+| Metric | Alarm threshold | Action |
+|---|---|---|
+| Bedrock throttling errors | > 3 in 1 min | Back off; check quota; consider request queue |
+| Bedrock latency p95 | > 15s per call | Slow model; check model choice; reduce prompt size |
+| Structured output validation failures | > 2% | Model drift or prompt regression; review recent changes |
+| Model Gateway retries | > 10% of calls | Provider degraded; check Bedrock status page |
+| AI cost per operation | Spike > 3× baseline | Unexpected prompt growth or wrong model routed |
 
-The Media Engine (FFmpeg rendering) is CPU/memory-heavy and unsuitable for the API request path.
+### Create My Story / AssetUnderstanding
 
-```text
-API  →  SQS queue (story-render-jobs)  →  Worker
-                                              │
-                                     Lambda (< 5 min jobs)
-                                              OR
-                                     Fargate task (> 5 min / high memory)
+| Metric | Alarm | Action |
+|---|---|---|
+| Create My Story end-to-end latency p95 | > 45s | Check uncached Moment count; verify eager analysis is running |
+| Moments with missing AssetUnderstanding at Create time | > 0 | Eager analysis is broken; fix the add-Moment analysis path |
+| Concurrent Bedrock calls per Create request | < N-1 (N = Moment count) | Analysis is serializing; fix fan-out |
+
+Eager caching is the primary defence against slow Create My Story.
+Monitor it as a first-class operational concern, not an afterthought.
+
+### S3 and media
+
+| Metric | Alarm | Action |
+|---|---|---|
+| S3 presigned upload failures | > 1% | Check IAM; check bucket policy; check expiry |
+| Temporary objects older than retention TTL | Any | S3 lifecycle may be misconfigured; verify lifecycle rule |
+| S3 upload size rejected | Spike | Client-side proxy generation may be broken |
+
+### Async worker (when enabled)
+
+| Metric | Alarm | Action |
+|---|---|---|
+| SQS dead-letter queue depth | > 0 | Job failing repeatedly; check Lambda/Fargate logs |
+| SQS queue age (oldest message) | > 5 min | Worker not consuming; check Lambda concurrency or Fargate task health |
+| Worker Lambda errors | > 1% | Check CloudWatch logs |
+| Worker job duration p95 | > 10 min (Lambda) | Consider migrating to Fargate task |
+
+### Structured log fields (all backend requests)
+
+Every log entry should include:
+
+```json
+{
+  "correlation_id": "<uuid>",
+  "operation": "<e.g. director.generate_shot_plan>",
+  "duration_ms": 1240,
+  "status": "success|failure",
+  "provider": "bedrock|openai|anthropic",
+  "model": "<model-id>",
+  "retries": 0,
+  "usage": { "input_tokens": 420, "output_tokens": 180 },
+  "validation_passed": true
+}
 ```
 
-- Start with **Lambda** (up to 10GB memory, 15-min timeout, sufficient for short clips)
-- Switch the worker to **Fargate** if rendering times or memory regularly exceed Lambda limits
-- Worker polls SQS, processes the `EditPlan`, writes MP4 to S3, updates DynamoDB, notifies iOS via a polling endpoint or push notification
+Never log raw media bytes, original filenames, user prompt text
+verbatim, or anything that would constitute user PII.
 
-Job status is stored in DynamoDB (`GeneratedOutput.status`). iOS polls `/outputs/{outputId}/status` until `ready`.
+### CloudWatch dashboards
 
----
+Maintain at minimum:
 
-## 8. AI Models — Model Gateway
+- **API health:** request rate, latency (p50/p95/p99), error rate, timeout count
+- **AI operations:** latency per engine, cost per operation type, validation failure rate
+- **Create My Story:** end-to-end latency, cached vs uncached Moment ratio
+- **Async worker:** queue depth, job duration, DLQ depth (when SQS enabled)
 
-All AI calls go through the `model-gateway` package. No engine calls a provider directly.
+### Operational runbooks (write before staging)
 
-```text
-Engine  →  model-gateway  →  AWS Bedrock  →  Claude / Titan / etc.
-                          →  OpenAI API   →  GPT-4o / o3
-                          →  Anthropic API (direct, if not via Bedrock)
+1. **App Runner request timeout storm** — requests returning 502: identify the slow operation from p99 metrics, move it to async path or parallelize Bedrock calls
+2. **Bedrock quota exceeded** — throttling errors: implement exponential backoff in Model Gateway; request quota increase if sustained
+3. **AssetUnderstanding cache miss** — Create My Story consistently slow: verify eager analysis fires on `addMoment`; check for analysis failures being silently swallowed
+4. **SQS DLQ messages accumulating** — worker jobs failing: inspect DLQ message body for error, check Lambda logs, fix and replay from DLQ
+
+## 38. AI Evaluation
+
+Evaluation artifacts live under `evals/`.
+
+AI quality evaluation is separate from production telemetry.
+
+Use human evaluation for Director, Story Guide, asset selection, and
+editing quality.
+
+Do not rely solely on models grading themselves.
+
+## 39. Configuration and Feature Flags
+
+Environment-specific values belong in configuration:
+
+-   API URL
+-   model names
+-   model routing
+-   timeouts
+-   upload limits
+-   mock/real engine selection
+-   catalog configuration
+
+Suggested environments:
+
+``` text
+local
+development
+staging
+production
 ```
 
-- **Primary:** AWS Bedrock (Claude 3.x for reasoning, multimodal for vision)
-- **Fallback / alternative:** direct Anthropic or OpenAI API keys via Secrets Manager
-- Model routing is internal to `model-gateway`; engines declare capability requirements, not model names
-- Structured generation (JSON mode / tool use) is the default for all engine calls
-- Vision calls (SceneUnderstanding, AssetUnderstanding) pass S3 object URLs or base64 blobs
+Use lightweight feature flags for:
 
----
-
-## 9. Secrets — AWS Secrets Manager
-
-| Secret name | Contents |
-|---|---|
-| `story/api-keys/bedrock` | Bedrock region / role ARN |
-| `story/api-keys/openai` | OpenAI API key (fallback) |
-| `story/api-keys/anthropic` | Anthropic API key (fallback) |
-| `story/s3/bucket-names` | Upload / output bucket names |
-| `story/dynamodb/table-name` | DynamoDB table name |
-
-Secrets are injected into App Runner and Lambda via IAM role + Secrets Manager integration. No secrets in environment variables or source code.
-
----
-
-## 10. Infrastructure-as-Code — AWS CDK (TypeScript)
-
-All AWS resources are defined in `infra/` as CDK stacks.
-
-### Stacks
-
-| Stack | Resources |
-|---|---|
-| `ApiStack` | App Runner service, ECR repository, DynamoDB table, IAM roles |
-| `StorageStack` | S3 upload and output buckets, bucket policies, CORS |
-| `WorkerStack` | SQS queue, Lambda worker function (or Fargate task definition) |
-| `ObservabilityStack` | CloudWatch log groups, dashboards, alarms |
-
-### Environments
-
-```typescript
-// infra/bin/story.ts
-new ApiStack(app, 'StoryApi-Dev',  { env: { account: '...', region: 'us-east-1' }, stage: 'dev'  });
-new ApiStack(app, 'StoryApi-Prod', { env: { account: '...', region: 'us-east-1' }, stage: 'prod' });
+``` text
+real_scene_understanding
+real_director
+real_asset_analysis
+real_edit_engine
+music_engine
 ```
 
-Dev and prod are separate CDK deployments. No shared state between environments.
+Do not build a complex feature-management service for MVP.
 
-### Deploy commands
+## 40. Dependency Rules
 
-```bash
-cd infra
-npm install
-npx cdk bootstrap   # once per account/region
-npx cdk deploy --all --context stage=dev
-npx cdk diff        # preview changes before deploy
+Allowed backend dependencies:
+
+``` text
+apps/api
+  → story-engine
+  → director-engine
+  → asset-engine
+  → music-engine
+  → edit-engine
+  → model-gateway
+  → observability
+
+story-engine
+  → contracts
+  → model-gateway
+
+director-engine
+  → contracts
+  → model-gateway
+
+asset-engine
+  → contracts
+  → model-gateway
+
+music-engine
+  → contracts
+  → model-gateway when needed
+
+edit-engine
+  → contracts
+  → model-gateway when needed
+
+model-gateway
+  → provider SDKs
 ```
 
----
+Disallowed:
 
-## 11. Observability
-
-- **Structured logging:** all Python packages log JSON via the `observability` package; log level from env (`LOG_LEVEL`)
-- **CloudWatch Logs:** App Runner and Lambda forward logs automatically
-- **CloudWatch Metrics:** custom metrics for AI call latency, render job duration, error rates
-- **Alarms:** error rate > 1% over 5 minutes → SNS notification
-- **Traces:** AWS X-Ray on App Runner and Lambda (opt-in, enabled in staging/prod)
-- **Evals:** separate from observability; eval harnesses live in `evals/` and run offline against logged inputs/outputs
-
----
-
-## 12. Local Development
-
-```text
-iOS app  →  localhost:8000  →  FastAPI dev server  →  mock engines
+``` text
+engines → apps/api
+model-gateway → product engines
+iOS → AI provider SDK/API
+iOS → backend implementation packages
+edit-engine → iOS Media Engine
+production code → prototypes/figma
+Python application/domain code → infrastructure/cdk
+Swift application code → infrastructure/cdk
 ```
 
-- `apps/api` runs locally with `uvicorn apps.api.main:app --reload`
-- Mock engines return deterministic data (Milestone A)
-- No AWS services required for Milestone A local dev
-- DynamoDB Local (Docker) optional for local persistence testing
-- S3 can be mocked with LocalStack or skipped (use local file paths) during skeleton phase
+Prefer orchestration in the API/application layer:
 
-Environment config:
-
-```text
-apps/api/.env.dev      # local dev
-apps/api/.env.staging  # staging (points to dev AWS stack)
-apps/api/.env.prod     # production (injected by App Runner from Secrets Manager)
+``` text
+API Orchestrator
+├── Story Engine
+├── Asset Engine
+├── Music Engine
+└── Edit Engine
 ```
 
----
+Avoid chains of product engines calling one another and creating hidden
+coupling.
 
-## 13. Package Dependency Rules
+## 41. Concurrency and Stale Responses
 
-```text
-ios app          → contracts (Swift models only)
-api              → story-engine, director-engine, edit-engine, music-engine, asset-engine, model-gateway, observability
-story-engine     → model-gateway, observability
-director-engine  → model-gateway, observability
-asset-engine     → model-gateway, observability
-edit-engine      → model-gateway, observability
-music-engine     → model-gateway, observability
-media-engine     → observability (no AI calls; executes EditPlan deterministically)
-model-gateway    → observability
-worker           → edit-engine, media-engine, observability
-contracts        → (no internal dependencies; pure types)
+Local state is authoritative.
+
+AI/network responses may arrive late.
+
+Before applying a response, verify its Story/Asset/Moment still exists
+and that the response is relevant to the current state.
+
+Examples:
+
+-   Moment removed while analysis runs
+-   Story completed while StoryIdea loads
+-   newer scene scan started before old result returns
+
+Use cancellation where practical.
+
+Never overwrite newer local user actions with stale AI output.
+
+## 42. Generated Output Versioning
+
+Do not build complex version control.
+
+A `GeneratedOutput` is immutable historical metadata.
+
+Record which Moment IDs/EditPlan produced it.
+
+Creating again after adding media creates another GeneratedOutput rather
+than mutating the previous one.
+
+## 43. Testing
+
+### iOS unit tests
+
+-   Story lifecycle
+-   use cases
+-   persistence mapping
+-   Moment management
+-   EditPlan interpretation
+-   media-path resolution
+
+### iOS integration tests
+
+-   SwiftData
+-   API client
+-   rendering
+-   Photos/camera behavior where practical
+
+### Backend unit tests
+
+-   each engine with fixed structured inputs
+
+### Contract tests
+
+``` text
+backend JSON
+→ schema validation
+→ Swift decoding
 ```
 
-No engine imports another engine. All cross-engine coordination goes through `api` or `worker`.
+### Real-device tests
 
----
+Required for: - camera - Photos - app lifecycle - persistence -
+playback - rendering - memory/performance
 
-## 14. Rendering Approach
+Simulator-only success does not satisfy Milestone A.
 
-- **Primary:** server-side via Media Engine (FFmpeg) running in the worker
-- **On-device rendering:** not in MVP scope; may be added later (AVComposition)
-- EditPlan is a deterministic specification; the same EditPlan produces the same output regardless of where it runs
-- Media Engine has no AI calls; it only executes what Edit Engine planned
+## 44. Deployment
 
----
+All cloud resources are deployed to AWS using CDK written in TypeScript.
 
-## 15. Mock vs Production Engine Interfaces
+### API service: AWS App Runner
 
-Each engine package exports a stable Python protocol/interface. Milestone A uses mock implementations behind those interfaces. Real implementations replace mocks per milestone without changing the API contract.
+The Story API runs on **AWS App Runner** — a fully managed container
+runtime that is always-on, scales on concurrency, and supports
+Server-Sent Events natively. It has no cold starts and requires no VPC,
+load balancer, or cluster configuration.
 
-```python
-# packages/director-engine/director_engine/interface.py
-class DirectorEngine(Protocol):
-    async def analyze_scene(self, input: SceneInput) -> SceneUnderstanding: ...
-    async def generate_concept(self, input: ConceptInput) -> StoryConcept: ...
-    async def generate_shot_plan(self, input: ShotPlanInput) -> StoryPlan: ...
+App Runner has a **120-second request timeout**. This is not a
+constraint in practice because:
 
-# Milestone A
-class MockDirectorEngine:
-    async def analyze_scene(self, input: SceneInput) -> SceneUnderstanding:
-        return SceneUnderstanding(description="Mock scene", ...)
+- Interactive operations (scene scan, shot plan, story ideas) complete
+  in 5-25 seconds
+- `AssetUnderstanding` is computed eagerly when each Moment is added,
+  not at Create time; cached results are available instantly at Create
+  My Story
+- Concurrent Bedrock calls for multiple Moments run in parallel, so
+  analysis time is bounded by the slowest single call (~8s), not
+  N × 8s
+- Any operation that legitimately exceeds 120s belongs in the async
+  worker path, not the synchronous request path
 
-# Milestone C (real)
-class BedrockDirectorEngine:
-    async def analyze_scene(self, input: SceneInput) -> SceneUnderstanding:
-        ...  # real Bedrock call
+### Async worker: AWS Lambda (SQS consumer)
+
+A separate Lambda function consumes an SQS queue for jobs that must not
+block the request path. Initially this queue is empty; introduce it only
+when measured workload requires it.
+
+Future worker jobs may include: large Edit Plan computation, generative
+media, or batch AssetUnderstanding.
+
+If a worker job exceeds Lambda's 15-minute limit or 10GB memory ceiling,
+migrate that specific job to an ECS Fargate task. The engine interfaces
+remain the same regardless of execution environment.
+
+### Initial MVP topology
+
+``` text
+Native iOS App
+      │
+      ▼
+AWS App Runner (Python FastAPI)
+      │
+      ├── Story / Director / Asset / Music / Edit engines (Python modules)
+      ├── Model Gateway ──► Amazon Bedrock / approved AI providers
+      ├── Amazon S3 ──────► private temporary media
+      ├── DynamoDB ───────► operational/job state when needed
+      ├── Secrets Manager
+      └── CloudWatch
+
+SQS queue ──► Lambda worker (async jobs when needed)
+              └── Fargate task (heavy jobs when Lambda limits are reached)
 ```
 
-The `api` package is always wired to an interface, never a concrete implementation directly.
+CDK is responsible for provisioning and wiring AWS resources. It is not
+responsible for Story product logic.
 
----
+MVP does not require:
 
-## 16. Explicitly Out of Scope for MVP
+-   Kubernetes/EKS
+-   service mesh
+-   one service per Story engine
+-   event-streaming platform
+-   distributed cache
+-   multi-region active-active
 
-- Kubernetes / EKS
-- GraphQL
-- WebSockets (SSE is sufficient)
-- Multi-region deployment
-- CDN (CloudFront) — add when GeneratedOutput delivery latency matters
-- User accounts or authentication (anonymous identity only)
-- Push notifications (polling is sufficient for MVP output status)
-- On-device AI inference
-- Android
+The default is one logical Python backend deployment boundary on App
+Runner. Engine modules remain code boundaries, not infrastructure
+boundaries.
+
+See `04-aws-infrastructure.md` for AWS stacks, environments, IAM, S3
+lifecycle, deployment flow, and future compute expansion.
+
+## 45. Backend Database
+
+A full cloud Story database is not required for Milestone A because
+persistent Story ownership is local-first.
+
+A small backend datastore may later hold:
+
+-   async job state
+-   temporary upload metadata
+-   operational metadata
+-   rate-limiting data
+-   anonymous-session support
+
+Do not duplicate the user's full Story library in the backend merely
+because a database exists.
+
+If accounts/cloud sync become required, design synchronization
+explicitly.
+
+## 46. Performance and Cost Principles
+
+Interactive local UI should feel immediate.
+
+AI work should show clear progress and should not block capture
+unnecessarily.
+
+Avoid unnecessary serial model calls.
+
+Cache stable derived state such as AssetUnderstanding.
+
+Measure model operation, latency, usage, and cost.
+
+Avoid re-analyzing unchanged media.
+
+Prefer:
+
+``` text
+analyze asset once
+→ cache AssetUnderstanding
+→ reason over structured result repeatedly
+```
+
+over repeatedly resending originals.
+
+## 47. Future Large-Library Path
+
+MVP does not solve thousands-of-assets processing, but current
+boundaries preserve the path:
+
+``` text
+local media library
+→ Asset Engine
+→ progressive/local indexing
+→ AssetUnderstanding
+→ embeddings / clusters / dedupe
+→ Story Engine
+→ story discovery / creation
+```
+
+Do not build this now.
+
+## 48. Future Generative Media Path
+
+Future generated supporting media should use a separate abstraction:
+
+``` text
+Story/Edit Engine
+→ GenerativeMediaRequest
+→ generation provider
+→ Generated Asset
+→ Asset
+```
+
+Generated media must remain distinguishable from captured real-world
+media.
+
+Do not couple a generation provider directly into iOS or Director
+Engine.
+
+## 49. Architecture Decision Table
+
+  Area                         MVP Decision
+  ---------------------------- ------------------------------------
+  Client                       Native iOS
+  UI                           SwiftUI
+  Camera                       AVFoundation
+  Photo library                PhotoKit / PhotosPicker
+  Local persistence            SwiftData
+  Original media               Device/local-first
+  Final rendering              On-device
+  Rendering                    AVFoundation
+  Backend                      Single modular application
+  Backend language             Python
+  Runtime                      AWS App Runner (container)
+  HTTP framework               FastAPI
+  API                          HTTPS + JSON
+  API version                  `/v1`
+  Contract source              JSON Schema + OpenAPI
+  AI access                    Backend only
+  AI abstraction               Model Gateway
+  Direct iOS AI calls          No
+  Persistent Story authority   Device for MVP
+  Cloud Story sync             Deferred
+  Required account             No
+  Identity                     Anonymous local identity
+  Scene media                  Sampled/resized/proxy
+  Permanent original upload    No
+  Temporary media              Private + expiring
+  Story Engine                 Backend module
+  Director Engine              Backend module
+  Asset Engine                 Backend module
+  Music Engine                 Backend module
+  Edit Engine                  Backend module
+  Media Engine                 On-device
+  Microservices                No
+  Queue                        Only after measured need
+  Figma HTML                   `prototypes/figma`, reference only
+  Large-library indexing       Deferred
+  Generative video             Deferred
+  Full editor                  Deferred
+
+## 50. Explicit Non-Goals
+
+MVP architecture does not include:
+
+-   production microservices
+-   cloud photo-library replacement
+-   permanent upload of all originals
+-   sophisticated cross-device sync
+-   web or Android client
+-   full timeline editor
+-   multi-user collaboration
+-   social graph
+-   public publishing backend
+-   third-party streaming music integration
+-   advanced distributed queues
+-   proprietary model hosting
+-   3D scene reconstruction
+-   AR capture overlays
+-   large-scale vector search
+-   full camera-roll indexing
+-   generative-video pipeline
+-   mandatory authentication
+
+## 51. Architecture Review Triggers
+
+Revisit this architecture if:
+
+1.  on-device rendering cannot support required output quality
+2.  cross-device synchronization becomes core
+3.  accounts become necessary for product value
+4.  asset analysis requires persistent cloud indexing
+5.  long-running jobs require a real queue/worker system
+6.  backend modules require independent scaling
+7.  generative video becomes core
+8.  Android/web becomes an active target
+9.  privacy requirements move more intelligence on-device
+10. real usage proves device-authoritative Story state insufficient
+
+Do not pre-build these solutions.
+
+## 52. Milestone A Architecture
+
+Milestone A uses the real architecture with mock intelligence.
+
+### Real
+
+-   SwiftUI screens
+-   navigation
+-   SwiftData
+-   Story lifecycle
+-   camera
+-   Photos picker
+-   local media
+-   Moment persistence
+-   playback
+-   local identity
+-   API boundary
+-   engine interfaces
+-   output plumbing
+
+### Mock
+
+-   CreativeIntent intelligence
+-   StoryBlueprint intelligence
+-   Story Guide
+-   Story Idea
+-   SceneUnderstanding
+-   Director
+-   validation
+-   AssetUnderstanding
+-   music recommendation
+-   EditPlan
+
+First vertical slice:
+
+``` text
+Launch
+→ Home
+→ Start a Story
+→ Creative Direction
+→ persist Story
+→ Story Home
+→ Shoot a Moment
+→ Mock Director
+→ real camera
+→ real local clip
+→ persist Moment
+→ Create My Story
+→ mock result
+→ persist GeneratedOutput metadata
+→ kill app
+→ relaunch
+→ Story and media still exist
+```
+
+## 53. Architecture Completion Check
+
+Kiro should be able to answer these without inventing new boundaries:
+
+``` text
+Where does a Story live?
+→ On-device for MVP.
+
+Where does original media live?
+→ On-device.
+
+Who owns Story Guide?
+→ Story Engine.
+
+Who owns scene-specific direction?
+→ Director Engine.
+
+Who understands media?
+→ Asset Engine.
+
+Who recommends/analyzes music?
+→ Music Engine.
+
+Who creates the edit?
+→ Edit Engine produces EditPlan.
+
+Who renders it?
+→ On-device Media Engine.
+
+Can iOS call AI providers?
+→ No.
+
+Does Story require an account?
+→ No.
+
+Does creating a video complete a Story?
+→ No.
+
+Does backend permanently store every original?
+→ No.
+
+Can a Story have multiple outputs?
+→ Yes.
+
+Is Figma HTML production code?
+→ No.
+
+Are Story Engine and Director Engine microservices?
+→ No; they are backend modules.
+```
+
+## 54. Final Architecture
+
+``` text
+                    STORY iOS
+          ┌────────────────────────┐
+          │ UX                     │
+          │ Local Story state      │
+          │ Camera / Photos        │
+          │ Original media         │
+          │ On-device rendering    │
+          └───────────┬────────────┘
+                      │ structured API / SSE
+                      ▼
+            AWS CLOUD / STORY BACKEND
+          ┌────────────────────────┐
+          │ AWS App Runner         │
+          │ Python / FastAPI       │
+          │ Story Engine           │
+          │ Director Engine        │
+          │ Asset Engine           │
+          │ Music Engine           │
+          │ Edit Engine            │
+          │ Model Gateway          │
+          └───────────┬────────────┘
+                      │
+                      ▼
+                   AI MODELS
+                (Bedrock / external)
+
+          SQS ──► Lambda / Fargate worker
+                  (async jobs when needed)
+```
+
+> **Cloud thinks. Device owns the media. AI produces structured
+> decisions. Deterministic systems execute them.**
+
+This architecture supports Story's product goal: **help users plan,
+guide, manage, and create visual stories while requiring as little
+filmmaking, media management, and editing work from the user as
+possible.**
+
+## 55. Language and Deployment Boundary Summary
+
+The chosen language split is intentional:
+
+``` text
+Consumer experience        Swift / SwiftUI
+Backend + AI intelligence  Python
+Infrastructure             TypeScript / AWS CDK
+Contracts                  JSON Schema + OpenAPI
+```
+
+This is consistent with the original architecture's separation of
+concerns. The original design already kept the native iOS client
+separate from the backend and treated infrastructure as an
+implementation detail. The revision changes the backend implementation
+language from TypeScript to Python and makes AWS/CDK explicit; it does
+not change Story's domain boundaries, local-first media model, engine
+responsibilities, structured contracts, or on-device rendering strategy.
+
+The rule is:
+
+> Use the language that best fits each responsibility; use contracts to
+> connect them.
