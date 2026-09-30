@@ -268,18 +268,12 @@ Do not implement multi-region active-active for MVP.
 
 Region is CDK/environment configuration.
 
-## 10. API Gateway
+## 10. App Runner HTTPS Endpoint
 
-API Gateway is the public backend ingress.
+App Runner exposes a managed HTTPS endpoint automatically. There is no
+API Gateway, load balancer, or ingress layer required for MVP.
 
-Responsibilities:
-
--   HTTPS endpoint
--   route integration
--   request size constraints
--   throttling where useful
--   standard error boundary
--   access logging where appropriate
+The App Runner service URL is the API base URL used by the iOS app.
 
 API paths remain domain-oriented:
 
@@ -293,7 +287,11 @@ API paths remain domain-oriented:
 /v1/uploads/*
 ```
 
-API Gateway must not expose model-provider-specific routes.
+Never expose model-provider-specific routes (e.g. `/openai/chat`).
+
+Add API Gateway in front of App Runner only if fine-grained throttling,
+WAF integration, or request transformation becomes necessary. That is a
+future addition, not a baseline requirement.
 
 ## 11. App Runner Backend
 
@@ -479,8 +477,8 @@ structured result
 
 Benefits:
 
--   media bytes do not pass through the API Lambda
--   lower Lambda memory/bandwidth usage
+-   media bytes do not pass through the App Runner service
+-   lower backend memory/bandwidth usage
 -   simpler large-object handling
 
 Presigned URLs should:
@@ -616,7 +614,7 @@ not provider model IDs.
 If a required model is outside AWS:
 
 ``` text
-Lambda/backend
+App Runner backend
 → Model Gateway
 → external HTTPS API
 ```
@@ -645,7 +643,8 @@ Store sensitive values such as:
 Do not store ordinary non-sensitive configuration in Secrets Manager
 unnecessarily.
 
-Lambda receives only the secrets it needs.
+The App Runner service and any Lambda workers receive only the secrets
+they need, injected via IAM role at runtime.
 
 Do not place secrets in:
 
@@ -661,13 +660,19 @@ Use least privilege.
 
 Examples:
 
-API Lambda may need:
+The App Runner service instance role may need:
 
--   `s3:PutObject`/presign-related access to temporary bucket
+-   `s3:PutObject` / presign-related access to the temporary media bucket
 -   `s3:GetObject` for processing inputs
 -   Bedrock invoke permissions for selected models
 -   read access to required Secrets Manager secrets
--   DynamoDB/SQS permissions only if those resources are enabled
+-   DynamoDB / SQS permissions only if those resources are enabled
+
+The Lambda async worker role may need:
+
+-   `sqs:ReceiveMessage`, `sqs:DeleteMessage` on the job queue
+-   `s3:GetObject` / `s3:PutObject` on the output bucket
+-   DynamoDB write access for job state updates
 
 Avoid broad policies such as:
 
@@ -702,15 +707,14 @@ Do not add KMS complexity without a concrete requirement.
 
 Capture:
 
--   Lambda errors
--   Lambda duration
--   Lambda throttles
--   API 4xx/5xx
--   API latency
+-   App Runner 5xx / 4xx rate
+-   App Runner request latency (p50 / p95 / p99)
+-   App Runner request timeout count (502s approaching 120s limit)
 -   model-operation latency
 -   model failures
 -   structured-output validation failures
 -   temporary upload failures
+-   Lambda worker errors and duration (when SQS worker is enabled)
 
 Application logs should include a correlation/request ID.
 
@@ -723,10 +727,11 @@ and reviewed.
 
 Before staging/external beta, create basic alarms for:
 
--   elevated API 5xx
--   Lambda errors
--   Lambda throttling
--   abnormal latency
+-   elevated App Runner 5xx rate
+-   App Runner p99 latency approaching 90 seconds (pre-timeout warning)
+-   App Runner request timeouts (502 from 120s breach)
+-   model/AI operation errors
+-   abnormal latency on AI calls
 -   async dead-letter queue depth if SQS exists
 
 Avoid building a large observability platform before real usage.
@@ -746,29 +751,28 @@ infrastructure cost.
 
 Cost-sensitive resources to watch:
 
--   Lambda duration/memory
--   API Gateway requests
--   S3 storage/transfer
+-   App Runner vCPU / memory hours
+-   S3 storage / transfer
 -   Bedrock inference
 -   external model APIs
+-   Lambda worker duration / memory (when enabled)
 -   future container jobs
 
-The likely early cost driver is AI inference rather than CDK/serverless
+The likely early cost driver is AI inference rather than App Runner
 infrastructure.
 
 ## 29. Networking
 
-Do not place Lambda in a VPC by default.
+Do not place App Runner in a VPC by default.
 
-The MVP backend primarily needs:
+App Runner reaches AWS services (S3, Secrets Manager, Bedrock, DynamoDB)
+and external AI APIs over public endpoints without a VPC.
 
--   AWS service access
--   public external AI APIs
-
-A VPC adds NAT/network complexity and cost.
+A VPC adds NAT gateway cost (~$32/mo) and configuration complexity.
 
 Introduce VPC networking only when a concrete private-resource
-requirement exists.
+requirement exists (e.g. a Lambda worker needing access to an RDS
+instance in a private subnet).
 
 ## 30. CORS
 
@@ -799,11 +803,14 @@ requirements require accounts.
 
 Before public exposure:
 
--   configure reasonable API Gateway throttles
--   enforce request/media size limits
--   validate content types
--   enforce per-installation/request quotas if necessary
+-   configure App Runner concurrency limits appropriately
+-   enforce request and media size limits in FastAPI middleware
+-   validate content types at the application layer
+-   enforce per-installation / per-request quotas if necessary
 -   protect expensive AI operations from unbounded retries
+
+If WAF or fine-grained throttling is required, add API Gateway in front
+of App Runner at that point.
 
 Do not depend on client UI alone to protect expensive endpoints.
 
@@ -892,13 +899,13 @@ mocks/fakes are simpler for most domain tests.
 
 The development AWS environment supports integration testing of:
 
--   API Gateway
--   Lambda packaging
+-   App Runner service deployment
+-   ECR image build and push
 -   S3 presigned uploads
--   IAM
--   Secrets Manager
--   Bedrock
--   DynamoDB/SQS when enabled
+-   IAM roles and permissions
+-   Secrets Manager injection
+-   Bedrock model calls
+-   DynamoDB / SQS when enabled
 
 It should not contain irreplaceable user data.
 
@@ -985,17 +992,18 @@ The deployment pipeline should fail if:
 
 CDK should not become the source of API semantics.
 
-## 43. Lambda Packaging
+## 43. Container Image Packaging
 
-Package the Python backend reproducibly.
+Package the Python backend as a Docker container image pushed to Amazon
+ECR. App Runner pulls from ECR on each deploy.
 
-The package should include:
+The image should include:
 
 -   `apps/api`
 -   required Python engine packages
 -   required runtime dependencies
 
-Do not package:
+Do not include in the image:
 
 -   Figma prototype
 -   specs
@@ -1003,8 +1011,11 @@ Do not package:
 -   unnecessary test fixtures
 -   CDK node modules
 
-If dependencies become too large for normal Lambda packaging, evaluate
-container-image Lambda or ECS rather than fragmenting domain engines
+Use a multi-stage Dockerfile: build dependencies in one stage, copy only
+the runtime artifact to the final stage to minimize image size.
+
+If the image becomes very large, evaluate splitting the async worker
+into a separate, smaller image rather than fragmenting domain engines
 prematurely.
 
 ## 44. Media Upload Limits
@@ -1055,10 +1066,10 @@ Examples:
 S3 upload fails
 → local original remains safe
 
-Lambda/model fails
+App Runner/model fails
 → Story/Moment remains local
 
-API Gateway unavailable
+App Runner unavailable
 → capture still persists locally
 
 rendering
@@ -1093,9 +1104,10 @@ CDK tests should verify important properties, for example:
 
 -   S3 Block Public Access enabled
 -   lifecycle expiration configured
--   Lambda receives only required environment variables
+-   App Runner service receives only required environment variables/secrets
+-   Lambda async worker (when enabled) receives only required environment variables
 -   IAM grants are scoped
--   API routes exist
+-   API routes exist on the App Runner service
 -   production resources use expected retention/protection settings
 
 Do not snapshot-test every generated CloudFormation line if targeted
