@@ -34,11 +34,18 @@ Two architecture decisions (approved):
 
 - **Resolution is server-side, always.** The resolver needs the Model Gateway
   + provider credentials, which may only live on the backend (03 §15, §40 forbid
-  iOS from touching an AI provider). The device keeps its local mock ONLY as an
-  offline/degraded fallback (§9), never as a second real implementation.
-- **Hybrid sync/async, split by input type** (§5): text/template resolution is
-  synchronous; reference-media resolution is an async job (presigned upload +
-  poll), because multimodal analysis can exceed the App Runner budget.
+  iOS from touching an AI provider). `MockStoryEngine` is retained for
+  **development / tests / offline engineering only** — it must NOT become a
+  production CreativeIntent (§9).
+- **Text/template resolution is synchronous** (§5). **Reference-media transport
+  is NOT locked** — it is determined by experiment. The preferred first attempt
+  is *synchronous* (local frame sampling → compressed representative frames →
+  one multimodal request), consistent with the principle *do not introduce
+  async/distributed infrastructure until measurements justify it*. Async
+  (temporary S3 + job + poll) is the documented fallback **only if** measured
+  latency/size exceeds the interactive budget. **Do not build job
+  infrastructure for this yet** — reference processing isn't even required for
+  the first DIRECT evaluation (§5, §12).
 
 No change to: the four model layers, local-first media, Create ≠ Complete,
 `active|completed`, or any existing Milestone-A runtime path.
@@ -111,8 +118,9 @@ CreativeDirectionInput { text?, template_id?, reference_asset_id?, context }
         │   template expansion (lookup → structured priors)
         │   explicit settings pass-through (duration, format, selected vibe)
         ▼
-(2) Reference analysis         — model, ONLY if reference_asset_id present (ASYNC)
+(2) Reference analysis         — model, ONLY if reference_asset_id present
         │   → ReferenceCharacteristics (energy, pace, shot-length, movement, …)
+        │   transport TBD by experiment (§5.2); prefer synchronous first
         ▼
 (3) Intent resolver            — model, structured output
         │   combine sources by precedence (§5); preserve nuance
@@ -133,7 +141,7 @@ not invented by the model (§13 of the draft).
 
 ---
 
-## 5. Transport: hybrid sync/async
+## 5. Transport
 
 ### 5.1 Text / template → synchronous
 `POST /v1/creative-intent`
@@ -157,24 +165,37 @@ Single fast structured-output call. Target latency ~1–3s (§8), well inside th
 120s App Runner budget. No queue — the infra doc forbids introducing SQS before
 measured need.
 
-### 5.2 Reference media → asynchronous (job + poll)
-Multimodal analysis can be slow and needs frames uploaded. Flow:
-```
-iOS → POST /v1/uploads               → presigned target + opaque key (04-infra §16)
-iOS → upload proxy/frames directly to S3 (bytes never cross the app server)
-iOS → POST /v1/creative-intent  with  source {type:"reference_asset", asset_id}
-        → 202 Accepted  { job_id }
-backend: Job(queued→running) → reference analysis → intent resolve → validate
-iOS → GET /v1/creative-intent/jobs/{job_id}   (poll; SSE optional later)
-        → { state: queued|running|succeeded|failed, result?: CreativeIntent }
-```
-Job states reuse the frozen vocabulary `queued|running|succeeded|failed|cancelled`
-(03 §31). Media constraints: client generates task-appropriate proxies/frames
-before upload; API rejects unsupported type/size (04 §32, §44). S3 objects are
-private, opaque-keyed, short-retention, auto-expiring — not a media library.
+### 5.2 Reference media → transport determined by EXPERIMENT (not locked)
 
-**MVP sequencing:** build 5.1 first and gate the first DIRECT evaluation on it.
-Reference (5.2) is added only if it does not block that evaluation (draft §26).
+A short reference video can plausibly be handled synchronously: the device
+samples a few representative frames and the backend makes one multimodal
+request. **We have not measured this yet**, so the transport is NOT an approved
+architecture decision — it is an experiment.
+
+**Preferred first attempt (synchronous):**
+```
+reference video
+   → local frame sampling (device)
+   → compressed representative frames (3–8)      (local-first; small payload)
+   → single multimodal request on POST /v1/creative-intent
+   → canonical CreativeIntent
+```
+
+**Fallback — ONLY if measured latency/size exceeds the interactive budget:**
+```
+   → temporary S3 (presigned upload, opaque key, auto-expire)   (04-infra §16)
+   → async Job (queued|running|succeeded|failed|cancelled, 03 §31)
+   → poll GET /v1/creative-intent/jobs/{job_id}  (SSE optional later)
+```
+
+**Do NOT build the job/upload infrastructure now.** It is designed above so we
+don't retrofit blindly, but it is gated on a measurement that hasn't happened.
+Reference processing is not required for the first DIRECT evaluation anyway.
+
+**MVP sequencing:** build 5.1 (text/template, synchronous) first and gate the
+first DIRECT evaluation on it. Reference (5.2) is added only if it does not
+block that evaluation (draft §26), and its transport is chosen from the
+measurement, not pre-committed.
 
 ---
 
@@ -247,14 +268,36 @@ reuses the structured-log field shape in 03 §37a.
 
 ## 9. Failure behavior
 
-CreativeIntent failure must never corrupt Story state (draft §19).
-- Reference analysis fails but text present → continue with text (degrade).
-- Model unavailable / network down (server) → return a recoverable UI state;
-  the device MAY fall back to the local mock intent, **flagged degraded**, so the
-  user is never blocked. The degraded intent is replaced on next successful
-  server resolution.
-- Structured output invalid after bounded repair → typed error → safe fallback,
-  not a silently-fabricated intent.
+CreativeIntent failure must never corrupt Story state (draft §19), and a
+failure must **never** be silently replaced by a fabricated interpretation.
+
+**`MockStoryEngine` is NOT a production fallback.** It exists for development,
+tests, preview, and offline engineering only. A mock turning "quiet,
+contemplative, make the mountain huge and us tiny" into `theme=journey,
+tone=energetic` would hand DIRECT an interpretation the user never asked for —
+worse than an honest failure.
+
+Production failure behavior:
+- **Reference analysis fails but text present** → continue with the text
+  (graceful degrade — we still have real user intent).
+- **Model unavailable / network down / structured output invalid after bounded
+  repair** → do NOT invent an intent. Instead:
+  ```
+  network/model failure
+         ↓
+  preserve the user's raw creative direction (and any explicit selections)
+         ↓
+  show a recoverable UI state
+         ↓
+  Retry
+  ```
+  Explicit, deterministic values the user actually chose (duration, format,
+  selected vibe) MAY remain available without AI — that is not a fabricated
+  interpretation. A deterministic offline fallback that preserves only such
+  explicit selections could be designed later; it is distinct from, and must
+  not be, `MockStoryEngine`.
+- The gateway raising a typed `StructuredOutputError` surfaces as this
+  recoverable state, never as a guessed CreativeIntent.
 
 ---
 
@@ -282,8 +325,13 @@ Currently iOS resolves intent locally and never calls the API. For this design:
    (flattened persistence; mapping documented in `02 §0a`). The device model
    does not need every contract field persisted for MVP — persist what the UI
    and Create flow use; keep the full contract available for the Director call.
-3. Keep the local Swift `MockStoryEngine` ONLY as the offline/degraded path (§9).
-4. Reference flow (5.2) additionally needs the presigned-upload client.
+3. Keep the local Swift `MockStoryEngine` for **development/tests/preview only**
+   — never as a production CreativeIntent. On production failure, preserve the
+   user's raw direction + explicit selections and show a retry/recovery state
+   (§9).
+4. Reference flow (§5.2) is experiment-gated: start with local frame sampling +
+   a synchronous request. Build the presigned-upload / job client **only if**
+   measurement forces the async fallback — not now.
 
 ---
 
