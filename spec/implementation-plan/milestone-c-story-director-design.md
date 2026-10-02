@@ -69,11 +69,25 @@ NEXT
   ValidationResult, and captured assets  → updates BeatProgress
         ↓
   updated DirectorState + next DirectorDecision (one of):
-     capture_shot  — next highest-value unfulfilled beat's shot
-     retry_shot    — same beat, clip usable-but-weak or a retake issue
+     capture_shot  — a NEW Director-selected shot (even if it serves the SAME,
+                     still-partial beat — e.g. a different composition that
+                     communicates "scale" more strongly)
+     retry_shot    — recapture SUBSTANTIALLY THE SAME requested shot because
+                     EXECUTION/validation failed (subject blocked, too short,
+                     severe shake) — NOT "Director wasn't satisfied"
      rescan_scene  — scene context stale/insufficient
      create_now    — enough material; stop asking for shots
 ```
+
+**`retry_shot` vs `capture_shot` — pinned semantics (do not blur):**
+- `retry_shot` = the *same* shot failed to execute; try it again. Driven by a
+  `ValidationResult` of retake/unusable.
+- `capture_shot` = Director chooses a *new* shot. This is the right action when a
+  clip is **usable but the beat is only `partial`** (the footage works, but the
+  narrative purpose isn't expressed strongly enough) — a NEW shot for the same
+  beat, not a retry. Keeping this distinction stops `retry_shot` from silently
+  becoming "Director wasn't satisfied," which would make the enum semantically
+  muddy. The enum stays four values; only the semantics are tightened.
 "Plan globally, direct incrementally" (05 §5). The loop ENDS when Director
 chooses `create_now` (minimum-sufficient capture, 05 §8) — not when a fixed shot
 list is exhausted. Initialize and NEXT are **logically distinct** (05 §9) but may
@@ -145,19 +159,48 @@ Per call, outside the domain objects: `operation`
 `shots_requested_so_far`, `usage`/cost, `correlation_id`. These feed the
 min-capture and utility evals (§10-12). Reuses the 03 §37a log shape.
 
-## 10. Scene-specificity evaluation (the top criterion, 05 §10)
+## 10. Scene-specificity + intent-sensitivity evaluation (the top criteria)
 
-Fixtures: same CreativeIntent (e.g. "cinematic and energetic") across materially
-different scenes — office, Times Square, TMB trail, birthday dinner, hotel room,
-beach. **Pass = the plans differ and exploit scene-unique properties**; fail = the
-generic "wide → medium action → close-up" template. This is the single most
-important Director quality gate.
+**Axis 1 — same intent, different scenes (05 §10).** Same CreativeIntent (e.g.
+"cinematic and energetic") across office, Times Square, TMB trail, birthday
+dinner, hotel room, beach. **Pass = plans differ and exploit scene-unique
+properties**; fail = the generic "wide → medium action → close-up" template.
+
+**Axis 2 — same scene, different intents (inverse test).** One scene (e.g. the TMB
+viewpoint) with intents "epic and cinematic", "quiet and intimate", "fast
+energetic adventure", "make the person feel tiny", "focus on the landscape". The
+plans must also **diverge materially** — otherwise a Director can pass
+scene-specificity while largely ignoring CreativeIntent.
+
+```
+                     Intent changes →
+Scene changes ↓      Director output must be sensitive on BOTH axes
+```
+Both axes together are the single most important Director quality gate.
 
 ## 11. Minimum-capture evaluation (05 §8)
 
 Measure shots requested vs. Story quality: does Director stop (`create_now`) when
-two clips suffice instead of demanding five? Does it reuse existing Moments rather
-than request redundant captures? Reward quality/effort, not maximal footage.
+two clips suffice instead of demanding five?
+
+**Scope (honest about Milestone-C inputs):** minimum-capture here means stopping
+based on captures produced in the **current CaptureSession** — the NEXT inputs are
+`DirectorState` + current-session captures + `ValidationResult`, which do NOT
+include pre-existing Story Moments. **Reuse of pre-existing Story assets** (so
+Director can decide an existing Moment already satisfies a beat and skip a
+capture) requires `AssetUnderstanding` / persistent-Story context and is a LATER
+milestone — not pulled into Milestone C. When that lands, the Director input
+grows additively, with no core redesign:
+```
+DirectorContext
+├── CreativeIntent
+├── SceneUnderstanding
+├── CaptureConstraints
+├── DirectorState
+├── current-session captures
+└── relevant existing asset summaries[]   ← later (AssetUnderstanding milestone)
+```
+Do NOT claim pre-existing-Moment reuse as a Milestone-C capability.
 
 ## 12. Director utility evaluation (05 §3, downstream)
 
@@ -197,10 +240,17 @@ experiment. 15. No fields without demonstrated value.
 - Optimal number of Beats.
 - Whether all planned Beats need explicit Shots up front.
 - Whether Director plans all Shots or materializes them incrementally.
-- Whether `BeatProgress.supporting_asset_ids` is needed.
 - Exact model/provider.
 - Whether initialize/next use one prompt or two.
 - How much persistent-Story context Director eventually receives.
+
+**Resolved since the first draft (no longer open):**
+- `BeatProgress.supporting_asset_ids` is **KEPT** (not an experiment). It is a
+  cheap, optional provenance link (Concept→Beat→Shot→Capture→Asset) that lets a
+  fulfilled beat record *what* fulfilled it — useful to the Edit Planner and to
+  debugging/eval. Low cost, so retained.
+- `retry_shot` vs `capture_shot` semantics are pinned (§2).
+- Minimum-capture is scoped to current-session captures (§11).
 
 ## 17. Definition of Done (implementation)
 
