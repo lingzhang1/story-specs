@@ -9,6 +9,37 @@ Output contract: `CreativeIntent`
 
 ---
 
+> **⚠️ SUPERSEDED FOR IMPLEMENTATION (2026-10-01).**
+> This document is kept as **design rationale**. The authoritative,
+> implementation-ready design is
+> [`milestone-c-creative-intent-design.md`](./milestone-c-creative-intent-design.md);
+> the canonical field contract is
+> [`02-core-story-schema.md`](./02-core-story-schema.md) §4 →
+> `contracts/schemas/creative-intent.schema.json`
+> (`contracts/schemas/ai_contracts.py :: CreativeIntentContract`).
+>
+> **Read order for implementation:** the Milestone C design + the schema FIRST
+> (what to build), then THIS doc for the *why* and the evaluation cases (§24).
+> The reasoning here (input sources §4, precedence §5, the "must NOT contain"
+> list §8, deterministic-vs-model split §10, reference features §18, eval cases
+> §24-25) is still current and NOT duplicated in the design doc.
+>
+> **The field names in §6/§7 below are ILLUSTRATIVE, not the contract.** Where
+> they differ from the frozen schema, the schema wins. Mapping:
+> - `tone` → split into `desired_feeling` + `style_tags`
+> - `storyEmphasis` → `emphasis`
+> - `creativeConstraints` / `avoid` → `creative_constraints` (positive + negative)
+> - `desiredDurationSeconds` → `target_duration_seconds`
+> - `sourceSummary` → `source_inputs[]` (full objects, not just booleans)
+> - `pace` → `pace` (adopted as a real field: `slow | moderate | fast`)
+>
+> **Decisions the draft left open are now CLOSED** in the design doc: resolution
+> is **server-side**; transport is **hybrid** (text/template synchronous,
+> reference media asynchronous via presigned upload + job poll); the Model
+> Gateway has a **typed structured-output contract** with bounded repair/retry.
+
+---
+
 # 1. Purpose
 
 Creative Intent converts the user's potentially vague, multimodal creative
