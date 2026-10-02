@@ -153,3 +153,48 @@ diverse scene eval set ✅, model comparison recorded ✅, failure captured as a
 deterministic check ✅, payload/latency support the sync design ✅, scan UX
 authored ✅, all tests green (81) ✅, frames ephemeral ✅.
 **Pending: physical-iPhone scan run** (human step).
+
+---
+
+# C2 Close — physical-iPhone verified + device regression fixed (2026-10-01)
+
+**Physical-iPhone E2E PASSED.** On a real device, Shoot a Moment → "Show me
+what's around you" scanned an indoor room (red backpack on a chair) → deployed
+AWS → real multimodal model → canonical SceneUnderstanding rendered in the scan
+UI. Subjects/prominence/operator_space/lighting were well grounded.
+
+**Quality regression found on-device + fixed (general, not object-specific):**
+The output inferred unsupported physical properties ("the backpack is heavy",
+"the chair may not be able to support a lot of weight") and emitted
+object-manipulation as motion opportunities ("the backpack could be moved to
+another location"). General fix applied:
+- **Prompt:** never infer weight/strength/stability/load-bearing/fragility/
+  accessibility/safety from images (images ≠ the physical world);
+  `motion_opportunities` are observable SUBJECT/CAMERA movement THROUGH the space,
+  not rearranging objects; a framing relationship requires BOTH elements visible;
+  constraints are shooting conditions, not object properties.
+- **Engine semantic guard + harness `scene_observational` check:** extended with
+  physical-property patterns (is heavy / support weight / load-bearing / fragile /
+  stable …) and object-manipulation patterns (could be moved / relocated /
+  lifted …). Generalizable, low false-positive — no backpack/chair-specific rules.
+- **Regression fixture** `su_backpack_physical_props_regression` added (real
+  device case; forbidden-property list covers the physical-property, manipulation,
+  and the unverified "framed by the window" grounding risk).
+
+**"framed by the window" grounding:** the actual submitted frames are ephemeral
+and were not retained (privacy by design), so I could not confirm whether the
+window was in-frame; classified and preserved as a potential grounding/
+hallucination failure in the regression fixture (prompt now requires both framing
+elements be visible).
+
+**Verification of the fix:**
+- Real model on an indoor-room scene post-fix → `motion_opportunities: []`,
+  `constraints: []` (physical-property + manipulation output GONE), still useful
+  (subjects + real composition observations) — NOT over-conservative.
+- Deployed + verified live: `/v1/scene-understanding` 200 with clean output;
+  C1 `/v1/creative-intent` still 200 (unaffected).
+- Scene eval 4/4 schema-clean post-fix; **83 pytest pass** (added 2 guard tests).
+
+**MILESTONE C2 CLOSED.** Scene model default `amazon.nova-pro-v1:0`
+(config-driven, task-specific). Recommend proceeding to Story Director (C3);
+NOT started.
