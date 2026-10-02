@@ -731,13 +731,18 @@ If `storyId` is absent, the CaptureSession belongs to standalone `Create Now`.
 
 ```ts
 interface SceneUnderstanding {
+  id: SceneUnderstandingId
+
   summary: string
 
   environmentTags?: string[]
 
-  subjects?: SceneSubject[]
+  subjects?: SceneSubject[]        // each: { label, note?, prominence? }
 
-  lighting?: string
+  lighting?: string                 // concise scalar description
+
+  operatorSpace?:
+    | "very_limited" | "limited" | "moderate" | "open" | "unknown"
 
   motionOpportunities?: string[]
 
@@ -745,7 +750,31 @@ interface SceneUnderstanding {
 
   constraints?: string[]
 }
+
+interface SceneSubject {
+  label: string
+  note?: string
+  prominence?: "high" | "medium" | "low"   // VISUAL prominence, not semantic importance
+}
 ```
+
+> **Milestone C freeze note (2026-10-01).** Reconciled against the Scene
+> Understanding tech design (`04-scene-understanding.md`). Adopted:
+> - **`operatorSpace`** (coarse enum) — visibly apparent room for the camera
+>   operator; a Director feasibility signal, NOT a safety guarantee.
+> - **`prominence`** on each subject (`high|medium|low`) — visual prominence.
+>
+> **Deliberately NOT added yet** (will be added only if Director evaluation
+> shows need): `scene_type` (covered by `summary` + `environmentTags`), a generic
+> `visual_opportunities` bag (kept split as `motionOpportunities` +
+> `compositionOpportunities` so observations don't blur into directing), a full
+> `spatialStructure` object (foreground/midground/background/depth), an array
+> `lighting`, and a separate `actionOpportunities` field (folded into
+> `motionOpportunities`). These remain measurable experiments.
+> Opportunities are OBSERVATIONS; Story Director decides what to shoot. Safety is
+> a Director constraint, never a SceneUnderstanding conclusion.
+> Canonical machine-readable contract:
+> `contracts/schemas/scene-understanding.schema.json`.
 
 Example:
 
