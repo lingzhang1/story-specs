@@ -1,8 +1,66 @@
 # Story — Core Domain Schema
 
-**Status:** MVP v0.1  
+**Status:** MVP v0.1 — **Milestone B frozen (2026-10-01).** This is the
+canonical design. The shared implementation schemas are frozen; real AI
+(Milestone C) must conform to them.
 **UX Status:** Frozen  
 **Purpose:** Canonical domain model shared by the Story iOS app, backend, and AI/media engines.
+
+---
+
+# 0. Milestone B Status — Frozen Schemas
+
+Milestone B froze the shared implementation schemas before any real
+intelligence. See `milestone-b-reconciliation.md` for the full comparison of
+this document against the Milestone A code.
+
+**Realized in code today (Milestone A slice):** `Story`, `StoryStatus`,
+`CreativeIntent` (flattened), `Moment`, `Asset`, `GeneratedOutput`,
+`LocalIdentity`. Mock engines only; backend store in-memory; iOS SwiftData is
+the source of truth.
+
+**Frozen as contracts in Milestone B (code wiring stays mock — no real AI):**
+machine-readable JSON Schema under `contracts/schemas/*.schema.json`, Pydantic
+models in `contracts/schemas/ai_contracts.py`, and Swift Codable DTOs in
+`apps/ios/.../Data/Contracts/StoryContracts.swift` for: `CreativeIntent`,
+`SceneUnderstanding`, `StoryConcept`, `StoryPlan`, `Shot`, `ValidationResult`,
+`CaptureSession`, `MusicDirection`, `AssetUnderstanding`, `EditPlan`.
+
+**Frozen naming decisions (deviations from earlier drafts, with reasons):**
+- `MomentSource` values are `directed` / `spontaneous` / `existing_media` /
+  `camera_import` — the `_capture` suffix from an earlier draft was dropped
+  because both platforms already persist these values on-device; renaming would
+  force a device migration for a cosmetic change (reconciliation §4.1).
+- The directed-shot element is named **`Shot`** (nested in `StoryPlan.shots[]`);
+  an earlier draft called it `ShotPlan`. The field set is unchanged
+  (reconciliation §4.2).
+
+---
+
+# 0a. The Four Model Layers (authoritative)
+
+One concept is represented in up to four distinct layers. **Do not use one
+model for everything** (03-system-architecture.md §7, §2 principle 4).
+
+| Layer | Lives in | Role | Rule |
+|---|---|---|---|
+| **Canonical domain** | `contracts/schemas/domain.py` (Python); `Domain/Engines/*.swift` value types (Swift) | What a concept *means* | No transport, persistence, AWS, or provider/model fields. |
+| **API DTO** | `contracts/schemas/dto.py` (Python); `Data/Contracts/*.swift` (Swift) | What crosses the network | snake_case JSON, ISO-8601 UTC, UUID ids. No SwiftData concerns. |
+| **SwiftData persistence** | `apps/ios/.../Data/Persistence/Models.swift` | How it is stored on device | Device-authoritative. Originals never stored as blobs; media is a relative path. May denormalize (e.g. flattened CreativeIntent). |
+| **AI structured-output** | `contracts/schemas/ai_contracts.py` + JSON Schema | Strict shapes AI must *produce/consume* | `extra="forbid"` — reject unknown keys. No provider/model fields. Validated at the boundary so AI can't silently drift the contract. |
+
+**Mapping is explicit, never implicit.** Documented edges:
+- Domain `CreativeIntent {raw_text, theme, tone, summary}` ↔ full AI contract
+  `CreativeIntent` (raw_text→`raw_user_description`, summary→`summary`,
+  theme/tone seed `style_tags`/`desired_feeling`).
+- SwiftData `AssetModel.relativePath` ↔ domain/DTO `Asset.local_uri` (device-local
+  resolution via `MediaStore`).
+- SwiftData `StoryModel.intent*` columns ↔ `CreativeIntentContract` (flattened ↔ structured).
+- SwiftData relationships (`MomentModel.story`) ↔ domain `Moment.story_id`.
+
+**Must NOT leak** (03 §7, §40; 04 §2 #11): SwiftData details into API/domain;
+AWS/CDK types into domain engines; provider/model IDs into any domain or
+contract field (model names are configuration, not domain — 03 §15).
 
 ---
 
@@ -472,11 +530,16 @@ interface Moment {
 
 ```ts
 type MomentSource =
-  | "directed_capture"
+  | "directed"
   | "existing_media"
-  | "spontaneous_capture"
+  | "spontaneous"
   | "camera_import"
 ```
+
+> **Milestone B freeze note.** Earlier drafts used `directed_capture` /
+> `spontaneous_capture`. The frozen values drop the `_capture` suffix to match
+> the shipped Swift + Python code, which already persists these values on
+> device; see `milestone-b-reconciliation.md` §4.1.
 
 A Moment may come from:
 

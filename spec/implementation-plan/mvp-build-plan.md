@@ -1,13 +1,75 @@
 # Story --- MVP Build Plan
 
-**Status:** Post-UX-freeze implementation plan\
+**Status:** Milestone A (walking skeleton) **built, deployed, and verified
+on a real iPhone**. Next work: expand the skeleton to full UX coverage,
+then begin real AI engines.\
+**Last reconciled:** 2026-10-01 against the shipped repo
+(`lingzhang1/story`).\
 **Product goal:** Build the smallest real iPhone product that proves
 Story can **plan, guide, manage, and create visual stories** for
 ordinary users.
 
 ------------------------------------------------------------------------
 
-# 1. Current State
+# 0. Progress Snapshot (what is actually built)
+
+The walking skeleton exists and runs end-to-end. The implemented slice is
+a **deliberate subset** of the full Milestone A spec below (§7): the
+Start-a-Story vertical was built first to prove architecture, persistence,
+and real device media before widening UX.
+
+## Done and verified ✅
+
+| Area | State |
+|---|---|
+| **Monorepo** | `/Users/lingzhang/Workplace/story`, pushed to [`lingzhang1/story`](https://github.com/lingzhang1/story) (private). Nested `specs/`, `prototypes/` stay independent. |
+| **Contracts package** | `contracts/schemas/domain.py` (pure domain), `dto.py` (wire DTOs), generated `story.schema.json` + `openapi/openapi.json`. Domain / DTO / persistence kept distinct. |
+| **Backend (`apps/api`)** | FastAPI. Endpoints: `GET /health`, `POST /v1/stories` (mock StoryEngine derives CreativeIntent), `POST /v1/stories/{id}/outputs` (mock EditEngine; asserts Create ≠ Complete). In-memory store (stateless MVP). |
+| **Engine packages** | 7 packages wired as **Protocol + deterministic mock**: `story_engine`, `director_engine`, `edit_engine`, `asset_engine`, `music_engine`, `model_gateway`, `observability`. No real AI. |
+| **iOS app (`apps/ios`)** | SwiftUI + SwiftData + AVFoundation, feature-oriented layout. Models (media stored as **relative path**, never blob/cloud URL), protocol-based engine clients + mocks, real-camera capture, local persistence with cascade delete, playback. |
+| **Container** | Multi-stage `Dockerfile`, port 8080. |
+| **Infra (`infrastructure/cdk`)** | TypeScript CDK, L1 `CfnService` App Runner + ECR (referenced by stable name), least-privilege roles, **zero** DynamoDB/SQS/Lambda/S3/API Gateway (jest-asserted). |
+| **Tests** | Backend `pytest` 12, contracts `pytest` 3, CDK jest 5 — all green. |
+| **Deploy** | Live dev backend on App Runner at `https://ydmju5wdps.us-east-1.awsapprunner.com` (account 989088054552, us-east-1). Image built in-cloud via throwaway CodeBuild (no local Docker), torn down after. `/health` 200 and `POST /v1/stories` 201 verified against the live URL. |
+| **Device acceptance** | Full slice verified on a real iPhone (free personal signing, 7-day profile): Start a Story → capture a real video Moment → Create My Story (status stays `active`) → kill → relaunch → everything (incl. playable video) survives. |
+
+## Implemented UX slice (subset of frozen UX)
+
+``` text
+HOME (minimal)
+└── Start a Story
+        ↓
+   Creative Direction  (mock CreativeIntent)
+        ↓
+   Story Home ── Moments
+        ├── Shoot a Moment  (mock direction → real camera → Moment)
+        └── Create My Story (mock GeneratedOutput; status unchanged)
+```
+
+## NOT yet built (remaining Milestone A scope, see §7)
+
+- Home entry points **Create Now** and **Use Existing Photos / Videos**
+- **Story Guide**, **Story Idea / Show Me**
+- **Complete / Reopen** Story lifecycle
+- Photo-library **picker** / existing-media import
+- `CaptureSession`, `SceneUnderstanding`, `StoryConcept`/`StoryPlan`/
+  `ValidationResult` objects (schema-defined but not realized in code yet)
+- Visual design pass to match the frozen Figma UX (current UI is a plain
+  functional skeleton; design is a separate view-layer step)
+
+## Known divergences to reconcile
+
+- **MomentSource values** differ between schema and code. Schema (`02`):
+  `directed_capture` / `spontaneous_capture` / `existing_media` /
+  `camera_import`. Code: `directed` / `spontaneous` / `existing_media` /
+  `camera_import`. Align in Milestone B when contracts are frozen.
+- Backend persistence is **in-memory** (`InMemoryStoryStore`) — the
+  source of truth for Milestone A is the **iOS SwiftData store**; the
+  backend is intentionally stateless for the slice.
+
+------------------------------------------------------------------------
+
+# 1. Original State (pre-build, retained for context)
 
 Product definition and UX are sufficiently frozen to begin
 implementation.
@@ -38,13 +100,13 @@ The next work is not more broad UX invention.
 The next work is:
 
 ``` text
-CORE DOMAIN SCHEMA
+CORE DOMAIN SCHEMA        ← done (02-core-story-schema.md)
       ↓
-SYSTEM ARCHITECTURE
+SYSTEM ARCHITECTURE       ← done (03-system-architecture.md)
       ↓
-WALKING SKELETON
-      ↓
-REAL AI ENGINES
+WALKING SKELETON          ← Start-a-Story slice done + on real iPhone;
+      ↓                      remaining UX paths pending (§7)
+REAL AI ENGINES           ← next after skeleton is widened
       ↓
 MEDIA CREATION
       ↓
@@ -56,6 +118,56 @@ FIELD EVALUATION
 # 2. Repository Structure
 
 Use one monorepo.
+
+**As built** (reconciled 2026-10-01) — the shipped layout differs from the
+original sketch below in a few ways, noted inline:
+
+``` text
+story/
+├── apps/
+│   ├── ios/                         # SwiftUI app (Xcode project at apps/ios/Story/)
+│   └── api/                         # FastAPI backend (app/, Dockerfile, tests/)
+│
+├── contracts/                       # [moved to ROOT, not packages/] domain + DTO + schemas
+│   ├── schemas/ (domain.py, dto.py, story.schema.json)
+│   └── openapi/ (openapi.json)
+│
+├── packages/                        # engine packages (Python, underscore names)
+│   ├── story_engine/                # Protocol + deterministic mock
+│   ├── director_engine/
+│   ├── asset_engine/
+│   ├── edit_engine/
+│   ├── music_engine/
+│   ├── model_gateway/
+│   └── observability/
+│   # NOTE: no media-engine package yet (rendering is a later milestone)
+│
+├── infrastructure/
+│   └── cdk/                         # [NEW] TypeScript CDK: App Runner + ECR
+│
+├── scripts/                         # dev.sh, export_openapi.py, build spec
+├── evals/                           # placeholder (empty for now)
+│
+├── conftest.py  pyproject.toml  .dockerignore  .gitignore
+│
+└── specs/, prototypes/              # nested INDEPENDENT git repos
+    ├── specs/story-specs            # this document lives here
+    └── prototypes/story-figma       # frozen Figma reference prototype
+```
+
+Differences from the original sketch (not problems — just the as-built
+reality to keep this doc honest):
+
+- `contracts/` is at the repo **root**, not under `packages/`.
+- Engine packages use **underscore** names (`story_engine`) for Python
+  import ergonomics, not hyphens.
+- Infra added under `infrastructure/cdk/` (not in the original tree).
+- No `services/worker/` and no `media-engine` package yet — rendering is a
+  later milestone (§17), split only when needed.
+- `specs/` and `prototypes/` are **separate git repos** nested in the
+  tree, not plain folders of the monorepo.
+
+**Original sketch (target reference):**
 
 ``` text
 story/
@@ -292,6 +404,12 @@ These are logical modules, not separate MVP services.
 
 This is the immediate implementation milestone.
 
+**STATUS (2026-10-01): PARTIALLY COMPLETE.** The Start-a-Story vertical
+slice is built, deployed, and verified on a real iPhone (A1, A2, A5, A6-
+subset, A7, and A8-subset all pass). Remaining: the Home entry points,
+Story Guide / Story Idea / Show Me, Complete/Reopen, and the existing-
+media picker (A3, A4-remainder). Per-task status is marked below.
+
 The goal is not AI quality.
 
 The goal is:
@@ -299,7 +417,7 @@ The goal is:
 > **Every frozen product path works end-to-end on a real iPhone with
 > mock intelligence and real local media/persistence.**
 
-## A1. Project foundation
+## A1. Project foundation  — ✅ DONE
 
 Build:
 
@@ -312,7 +430,7 @@ Build:
 -   logging
 -   basic error handling
 
-## A2. Local identity and persistence
+## A2. Local identity and persistence  — ✅ DONE (verified: kill/relaunch survives)
 
 Implement:
 
@@ -334,7 +452,7 @@ Create Story
 → Story and Moment still exist
 ```
 
-## A3. Home
+## A3. Home  — ⏳ PENDING (only a minimal Home + Start a Story exists)
 
 Implement frozen Home:
 
@@ -346,7 +464,11 @@ Implement frozen Home:
 
 Active/completed organization must work.
 
-## A4. Persistent Story
+## A4. Persistent Story  — 🟡 PARTIAL
+
+Done: Creative Direction, Story Home, Moments, Shoot a Moment, Create My
+Story. Pending: add existing photos/videos, remove/preview Moment, Story
+Guide, Story Idea, Show Me, Complete Story, Reopen Story.
 
 Implement:
 
@@ -363,7 +485,11 @@ Implement:
 -   Complete Story
 -   Reopen Story
 
-## A5. Real media plumbing
+## A5. Real media plumbing  — 🟡 PARTIAL
+
+Done: camera permission, video capture, local asset references,
+thumbnails/playback, local persistence. Pending: photo-library permission
++ photo/video picker.
 
 Implement real:
 
@@ -378,7 +504,11 @@ Implement real:
 
 Do not upload originals by default.
 
-## A6. Mock DIRECT
+## A6. Mock DIRECT  — 🟡 PARTIAL
+
+Done: a deterministic MockDirectorEngine returns per-Moment shot guidance.
+Pending as structured objects: SceneUnderstanding, StoryConcept,
+StoryPlan, ValidationResult (not yet modeled in code).
 
 Use deterministic mock data for:
 
@@ -398,7 +528,11 @@ Walk toward the ridge.
 6 seconds.
 ```
 
-## A7. Mock Create My Story
+## A7. Mock Create My Story  — 🟡 PARTIAL
+
+Done: mock GeneratedOutput created via MockEditEngine; Story status stays
+unchanged (Create ≠ Complete, asserted). Pending: music selection UI, an
+explicit "fake processing" state, Moments preview before create.
 
 Implement:
 
@@ -409,7 +543,13 @@ Implement:
 
 The Story status must remain unchanged.
 
-## A8. Walking-skeleton acceptance test
+## A8. Walking-skeleton acceptance test  — 🟡 PARTIAL (core slice ✅)
+
+The core slice below is **verified on a real iPhone** (Start a Story →
+Creative Direction → Story Home → Shoot a Moment → record real clip → save
+→ inspect → Create My Story → mock result → kill → relaunch → state
+intact). The full frozen-UX acceptance (Create Now, existing-media, Story
+Idea/Show Me, Complete/Reopen) remains to be exercised once A3/A4 land.
 
 A complete vertical slice must work:
 
@@ -1084,19 +1224,35 @@ A feature enters MVP only if it helps test:
 
 # 27. Immediate Next Steps
 
-The next work should happen in this order:
+**Original plan (steps 1-8 complete):**
 
 ``` text
-1. Finalize 02-core-story-schema.md
-2. Write 03-system-architecture.md
-3. Create monorepo/package skeleton
-4. Move Figma HTML under prototypes/figma/
-5. Add prototypes/figma/README.md declaring it reference-only
-6. Build Milestone A walking skeleton
-7. Run it on a real iPhone
-8. Fix architecture/state/persistence issues
-9. Stabilize concrete API/contracts
+1. Finalize 02-core-story-schema.md          ✅ done
+2. Write 03-system-architecture.md           ✅ done
+3. Create monorepo/package skeleton          ✅ done
+4. Move Figma HTML under prototypes/figma/    ✅ done (prototypes/story-figma)
+5. Add prototypes/figma/README.md             ✅ done
+6. Build Milestone A walking skeleton         🟡 Start-a-Story slice done
+7. Run it on a real iPhone                     ✅ done + full acceptance passed
+8. Fix architecture/state/persistence issues   ✅ none blocking
+9. Stabilize concrete API/contracts            ⏳ next (Milestone B)
 10. Begin CreativeIntent + SceneUnderstanding + Director Engine
+```
+
+**Actual next work, in order:**
+
+``` text
+1. (Optional, high visual payoff) DesignSystem pass — match the frozen
+   Figma UX in the SwiftUI view layer only. Low risk: views already
+   depend on protocols; domain/persistence/engine code is untouched.
+2. Widen Milestone A to full frozen UX (A3/A4 remainder):
+   Home (Create Now, Use Existing Photos), Story Guide, Story Idea /
+   Show Me, Complete / Reopen, photo-library picker.
+3. Reconcile MomentSource naming (schema vs code) and freeze contracts
+   (Milestone B): add CaptureSession, SceneUnderstanding, StoryConcept,
+   StoryPlan, ValidationResult, Asset/AssetUnderstanding to the shared
+   contract and the Swift/backend models.
+4. Only then begin real AI (Milestone C onward).
 ```
 
 The walking skeleton should start only after the core schema and
@@ -1106,6 +1262,10 @@ invent them during implementation.
 Do not wait for a perfect production architecture.
 
 The goal is to define stable boundaries, then learn by building.
+
+**Operational note:** the dev App Runner service bills while running
+(~$5-15/mo at 1 vCPU / 2 GB). Pause or tear it down between test sessions
+when the API is not being exercised.
 
 ------------------------------------------------------------------------
 
