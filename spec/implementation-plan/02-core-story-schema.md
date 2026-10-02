@@ -249,8 +249,9 @@ interface CreativeIntent {
 
   desiredFeeling?: string[]
   styleTags?: string[]
+  pace?: "slow" | "moderate" | "fast"
   emphasis?: string[]
-  avoid?: string[]
+  creativeConstraints?: string[]
 
   targetDurationSeconds?: number
   targetFormat?: OutputFormat
@@ -258,6 +259,19 @@ interface CreativeIntent {
   rawUserDescription?: string
 }
 ```
+
+> **Milestone C freeze note (2026-10-01).** Two refinements adopted from the
+> Creative Intent tech design (`04-creative-intent.md`):
+> - **`pace`** added as a categorical field (`slow | moderate | fast`) — Story
+>   Director consumes an explicit pacing signal; inferring it from tone is
+>   lossy. It is NOT exact edit timing (that belongs to StoryPlan/EditPlan).
+> - **`avoid` was widened to `creativeConstraints`** — the earlier field held
+>   only negative preferences, but important constraints are often phrased
+>   positively ("authentic, not staged", "focus on the environment, not me")
+>   or as a positive+negative pair ("epic but not cheesy"). `creativeConstraints`
+>   holds both. Keep it concise — not a dump for model reasoning.
+> The machine-readable contract is `contracts/schemas/creative-intent.schema.json`
+> (generated from `CreativeIntentContract` in `contracts/schemas/ai_contracts.py`).
 
 Example:
 
