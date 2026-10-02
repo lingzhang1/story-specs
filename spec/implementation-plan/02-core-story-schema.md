@@ -838,7 +838,9 @@ Example:
 
 # 17. StoryPlan
 
-`StoryPlan` describes the directed capture needed for one concept.
+`StoryPlan` describes the directed capture needed for one concept — WHAT
+material would create the Story. It is a PLANNING object and does NOT own
+execution progress (that is `DirectorState`, §20a).
 
 ```ts
 interface StoryPlan {
@@ -846,31 +848,46 @@ interface StoryPlan {
 
   conceptId: StoryConceptId
 
-  shots: ShotPlan[]
+  beats: StoryBeat[]       // the narrative purposes this plan expresses
+
+  shots: Shot[]            // every shot serves a beat (shot.beatId)
 
   estimatedDurationSeconds?: number
 }
+
+// A creative/narrative purpose the Story must express. Minimal by design.
+interface StoryBeat {
+  id: string               // e.g. "beat_scale"
+  purpose: string          // "Establish the human/landscape scale contrast."
+}
 ```
 
-MVP should generally use:
-
-```text
-1–3 shots
-```
-
-Do not generate elaborate production shot lists.
+MVP should generally use `1–3 shots`. Do not generate elaborate production
+shot lists. **Every Beat serves the StoryConcept; every Shot serves a Beat**
+(05-story-director.md §20). Deliberately NO `beat_type`, `emotion_curve`,
+`importance_score`, etc. on `StoryBeat` — added only on demonstrated need.
 
 ---
 
-# 18. ShotPlan
+# 18. Shot
+
+(Named `Shot` — the element of `StoryPlan.shots[]`; earlier drafts called it
+`ShotPlan`.) A Shot has two explicit layers (05 §12): `purpose` is the INTERNAL
+semantic reason it exists (what Validation cares about); `instruction` is the
+simple USER-FACING direction. Keep them distinct — do NOT collapse into one, and
+do NOT introduce duplicate names like `camera_behavior`/`subject_behavior`.
 
 ```ts
-interface ShotPlan {
-  id: ShotPlanId
+interface Shot {
+  id: ShotId
 
   order: number
 
-  instruction: string
+  instruction: string         // user-facing direction
+
+  beatId?: string             // the StoryBeat this shot serves
+
+  purpose?: string            // internal semantic reason (for Validation)
 
   targetDurationSeconds?: number
 
@@ -881,8 +898,6 @@ interface ShotPlan {
   subjectAction?: string
 
   exampleAssetId?: AssetId
-
-  validationCriteria?: ValidationCriteria
 }
 ```
 
@@ -891,12 +906,54 @@ Example:
 ```json
 {
   "order": 1,
-  "instruction": "Keep the camera still and walk toward the ridge.",
-  "targetDurationSeconds": 6,
+  "beatId": "beat_scale",
+  "purpose": "Establish scale by keeping the person small against the mountain.",
+  "instruction": "Have your partner walk down the trail. Stay here and keep them small against the mountain. Hold still for about 3 seconds.",
+  "targetDurationSeconds": 3,
   "framing": "wide",
-  "subjectAction": "walk away from camera"
+  "cameraMotion": "static",
+  "subjectAction": "walk away along trail"
 }
 ```
+
+---
+
+# 18a. DirectorDecision and DirectorState (Director loop)
+
+DIRECT is a **decision loop**, not only a static plan generator
+(05-story-director.md §5, §7, §19). The Director returns ONE strongest next
+action; fulfillment is tracked as Director state, separate from the plan.
+
+```ts
+// What the user/system should DO next (one strongest recommendation).
+interface DirectorDecision {
+  action: "capture_shot" | "create_now" | "rescan_scene" | "retry_shot"
+  shot?: Shot              // present for capture_shot / retry_shot
+  reason?: string          // internal rationale (not necessarily user-facing)
+}
+
+// How far one beat has been fulfilled — DIRECTOR state, categorical.
+interface BeatProgress {
+  beatId: string
+  status: "unfulfilled" | "partial" | "fulfilled"
+  supportingAssetIds?: AssetId[]   // optional; its need is an open experiment
+}
+
+// Mutable DIRECT execution state, owned by the CaptureSession (§20b).
+interface DirectorState {
+  currentBeatId?: string
+  beatProgress: BeatProgress[]
+  lastDecision?: DirectorDecision
+}
+```
+
+Responsibility boundary (05 §6, §7):
+- **Shot Validator** answers "did we capture the requested Shot?"
+  (`ValidationResult`, shot-level — §20).
+- **Director** answers "did what we captured sufficiently fulfill this Beat?"
+  (`BeatProgress`). `ValidationResult` carries NO beat-fulfillment score.
+- `StoryPlan` = the intent (stable); `DirectorState` = what actually happened
+  (mutable). They are kept separate deliberately.
 
 ---
 
