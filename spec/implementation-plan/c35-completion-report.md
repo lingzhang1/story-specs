@@ -1,6 +1,8 @@
 # C3.5 — Figma UX Convergence — Completion Report (Phase 7)
 
-**Status:** code-complete; awaiting physical-iPhone acceptance recording.
+**Status:** ✅ CLOSED — physical-iPhone acceptance PASSED (2026-10-02, owner-verified).
+The Phase-7 Figma-converged build runs correctly on a real iPhone and the product
+UX is accepted. No further C3.5 UI changes. C4 NOT started.
 **Frozen Figma:** `prototypes/story-figma/src/App.tsx` @ git `ba88526`.
 **Scope rule honored:** zero changes to C1 Creative Intent, C2 Scene Understanding,
 C3 Director, Opus model, prompts, contracts, ModelGateway, eval corpus, backend, or
@@ -98,4 +100,4 @@ non-R is an intentional disabled/empty state tracked in `ui-capability-matrix.md
 - [x] Fonts bundled; diagnostics behind product/debug toggle
 - [x] Cheap capabilities wired (Complete/Reopen + sort, add-to-Moments, Moments remove)
 - [x] 98 backend tests green; parse-clean; C1–C3/contracts/model/AWS untouched; C4 not started
-- [ ] **Physical-iPhone acceptance recording (owner-run) — the final gate**
+- [x] **Physical-iPhone acceptance (owner-run) — PASSED 2026-10-02. C3.5 CLOSED.**
