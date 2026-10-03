@@ -29,15 +29,15 @@ the frozen product's ~25 consumer screens + lifecycle.
 | ScreenFinalCapture (Got it / Create my Story / music) | dismiss → StoryHome | PARTIAL | MISSING | ADD (Create wired-or-disabled; music DISABLE) |
 | rescan_scene state | SceneScanFlowView .recommendation(rescan) | IMPLEMENTED | NEW_REAL_SYSTEM_STATE | KEEP (Scan again, no camera — already correct) |
 | create_now state | SceneScanFlowView .recommendation(createNow) | PARTIAL | NEW_REAL_SYSTEM_STATE | KEEP + DISABLE downstream generate |
-| ScreenTMB (persistent Story Home: status, mosaic, Shoot, Create, Story Idea, Guide, menu) | StoryHomeView (summary, chips, moments, Shoot, Create) | PARTIAL | ENGINEERING_SCAFFOLD | REBUILD_TO_FIGMA (Shoot/Create/Moments WIRED; Story Idea + Guide DISABLED static; menu Complete WIRE-if-cheap) |
+| ScreenTMB (persistent Story Home: status, mosaic, Shoot, Create, Story Idea, Guide, menu) | StoryHomeView (summary, chips, moments, Shoot, Create) | PARTIAL | ENGINEERING_SCAFFOLD | REBUILD_TO_FIGMA (Shoot/Create/Moments WIRED; Complete Story WIRED C3.5; Story Idea + Guide neutral-unavailable, NOT TMB copy) |
 | ScreenTMBLooked / ScreenTMBReady (enough-captured prompts) | — | NOT_IMPLEMENTED | MISSING | ADD (map to create_now semantics; generation DISABLED) |
 | ScreenMoments (manage, remove-from-Story, add) | inline MomentRow list | PARTIAL | ENGINEERING_SCAFFOLD | REBUILD_TO_FIGMA (grid, remove-from-Story WIRED; add-media per below) |
 | ScreenMediaPicker (analyze mode) + PreMediaResult A/B/C | — | NOT_IMPLEMENTED | MISSING | ADD DISABLED entry (AssetUnderstanding) |
-| ScreenMediaPicker (add mode) | — | PARTIAL | MISSING | ADD (WIRE PHPicker-append if cheap; else DISABLE) |
+| ScreenMediaPicker (add mode) | — | PARTIAL | MISSING | ADD + WIRE (C3.5: PHPicker append to Moments) |
 | ScreenTMBPreview (create preview: media grid, music, Create) | — | NOT_IMPLEMENTED | MISSING | ADD (grid WIRED; Create DISABLED; music DISABLE) |
 | Screen10Creating / Screen11Result (generate + output) | createStoryOutput mock + outputs list | NOT_IMPLEMENTED (mock) | ENGINEERING_SCAFFOLD | REBUILD_TO_FIGMA EMPTY_STATE; mock → DEBUG_ONLY; Save/Version/Share DISABLE |
 | ScreenTMBMusic + Music rows/sheet | — | NOT_IMPLEMENTED | MISSING | ADD DISABLED (Music Engine) |
-| Complete Story / Reopen (menu) | status enum only | PARTIAL | MISSING | WIRE-if-cheap (local status flip + sort) else DISABLE |
+| Complete Story / Reopen (menu) | status enum only | PARTIAL | MISSING | ADD + WIRE (C3.5: local status flip + completed-sort) |
 | "What Story understood" raw chips | StoryHomeView IntentChips (#if DEBUG now) | IMPLEMENTED | ENGINEERING_SCAFFOLD | MOVE_TO_DEBUG (done) |
 | Director debug panel (beats/shots/decision/latency/model, good/bad) | DirectorDebugPanel (#if DEBUG) | IMPLEMENTED | — | KEEP (DEBUG) + extend per §7 |
 
@@ -74,8 +74,9 @@ type scale; spacing/radius tokens) · `PrimaryButton` · `SecondaryButton` ·
 - **Product-semantic note (not a blocker, confirm):** the Figma persistent-Story
   home is heavily TMB-hardcoded (chapters, guide categories, mosaic images). We
   implement the *structure* generically off the real StoryModel; the Story
-  Guide/arc content is DISABLED static (no StoryBlueprint capability yet). Flagging
-  so "Story Guide looks static" is understood as intended, not a miss.
+  Guide/Story Idea are rendered in a **neutral, clearly unavailable state** (NOT
+  the TMB demonstration copy, which is not production-generated content). Flagging
+  so "Story Guide shows a coming-soon state" is understood as intended, not a miss.
 - **Scope reality:** this is ~15–20 new/rebuilt SwiftUI screens. Large but
   mechanical; no AI/architecture work. Proposed to execute Phases 2→5 then the
   physical-iPhone pass (Phase 6, user-run).
