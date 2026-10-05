@@ -1,5 +1,25 @@
 # Milestone C4 — Shot Validation: Design Reconciliation (DESIGN ONLY)
 
+> # ⛔ REJECTED FOR INLINE MVP IMPLEMENTATION (2026-10-05, approved)
+> **This full inline semantic Shot Validation design is NOT the active MVP plan.** The
+> GO/NO-GO audit (`milestone-c4-go-no-go-audit.md`) — on evidence from the C4A model
+> evaluation (`milestone-c4a-shot-validation-eval-report.md`) and the C4A.2 Capture
+> Evidence experiment (`milestone-c4a2-capture-evidence-report.md`) — concluded **B:
+> BUILD C4-LITE**. Inline semantic validation does not earn its ~4–5s blocking latency,
+> recurring per-capture inference cost, network dependency, implementation complexity, or
+> its trust-breaking false-GOT-IT failure mode on the ≤10s DIRECT-like band.
+>
+> **The active MVP is `milestone-c4-lite-capture-integrity-design.md`** (local-only
+> integrity checks; no AI/AWS/Bedrock/network). **This document is PRESERVED in full as
+> rationale and research** — the corpus, harness, prompt, four-axis judgment model, model
+> comparison, derivation logic, Moment lifecycle, and CaptureEvidence experiment are all
+> valuable inputs for the **future asynchronous Asset Understanding**, where the semantic
+> responsibilities (execution_match, shot_purpose, story_utility, Shot/Beat contribution,
+> useful-elsewhere reasoning) now live. The old C4B/C/D build sequence below is **not**
+> being executed. Do not erase this; do not implement it inline.
+>
+> ---
+
 > **Status: DESIGN / RECONCILIATION — DECISIONS APPROVED (2026-10-04). Not implemented.**
 > No production contract is modified by this document. No raw corpus file is moved, renamed,
 > or transcoded. The contract-affecting choices approved by the user are now **authoritative**

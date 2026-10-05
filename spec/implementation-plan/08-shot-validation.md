@@ -1,6 +1,29 @@
 # 08 — Shot Validation
 
-## Overview
+> # ⛔ REJECTED FOR INLINE MVP IMPLEMENTATION (2026-10-05, approved)
+> **The immediate/inline semantic Shot Validation described below is NOT the active MVP
+> plan.** The GO/NO-GO audit (`milestone-c4-go-no-go-audit.md`), on evidence from
+> `milestone-c4a-shot-validation-eval-report.md` and
+> `milestone-c4a2-capture-evidence-report.md`, found that inline semantic validation does
+> not earn its ~4–5s blocking latency, recurring inference cost, network dependency,
+> complexity, or its trust-breaking false-GOT-IT failure mode (≤10s band: 0.61 user-state
+> accuracy, 10/11 errors false GOT IT, one trust-breaking).
+>
+> **Active MVP plan = C4-LITE, a CAPTURE INTEGRITY checker** — see
+> `milestone-c4-lite-capture-integrity-design.md`. C4-Lite is local-only (no AI / no AWS /
+> no Bedrock / no network), makes **negative** claims ONLY for high-confidence obvious
+> integrity failures, and otherwise says neutral **"Saved" / "Moment added"** — it NEVER
+> claims the requested Shot/Beat was fulfilled, semantic success, or Story utility.
+>
+> **The entire semantic design in this file (three states GOT IT / KEEP + ONE MORE / TRY
+> AGAIN, 4-axis judgment, purpose-conditioned VLM, derivation) is PRESERVED BELOW as
+> rationale/research for the future asynchronous Asset Understanding**, where the semantic
+> Shot/Beat/execution/story-utility judgment moves. Do not implement it inline. Nothing
+> below this banner describes the active MVP.
+>
+> ---
+
+## Overview (HISTORICAL — semantic design, moved to async Asset Understanding)
 
 After each captured clip, quickly check whether it accomplishes the creative purpose for
 which the Shot was requested — **not** whether the user literally obeyed the instruction.

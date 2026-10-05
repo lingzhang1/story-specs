@@ -1012,6 +1012,20 @@ How well is the current beat fulfilled?
 
 That makes DIRECT adaptive rather than scripted.
 
+> **⛔ Supersession note (2026-10-05, C4-Lite decision).** The LOOP above shows the Director
+> consuming an inline `ValidationResult` ("CapturedAsset + ValidationResult + StoryPlan
+> state → how well is the beat fulfilled?"). **That inline semantic validation path is NOT
+> being built for the MVP** — the GO/NO-GO audit (`milestone-c4-go-no-go-audit.md`) rejected
+> inline semantic Shot Validation (latency/cost/trust). In the C4-Lite MVP there is **no
+> inline semantic `ValidationResult`**; the capture loop runs only a local **capture
+> integrity** check (`milestone-c4-lite-capture-integrity-design.md`) that can neutrally
+> save a Moment or flag an obvious integrity failure, but makes **no beat/shot-fulfillment
+> judgment**. Beat-progress / semantic shot-success therefore does **not** update inline.
+> The future Director loop will consume **settled asynchronous Asset/Moment Understanding
+> and Story coverage**, not an inline validation guess; that integration is designed
+> together with Asset Understanding. Principle 10 below ("Validation feeds back into
+> Director") still holds in spirit, but via async understanding, not an inline validator.
+
 ---
 
 # 20. What I would freeze now

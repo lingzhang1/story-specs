@@ -9,6 +9,18 @@ then begin real AI engines.\
 Story can **plan, guide, manage, and create visual stories** for
 ordinary users.
 
+> **⛔ C4 Shot Validation plan update (2026-10-05).** Inline semantic Shot Validation
+> (the old C4 "real ValidationResult from captured video → BeatProgress" path) is
+> **REJECTED for the MVP** per the GO/NO-GO audit (`milestone-c4-go-no-go-audit.md`,
+> evidence in `milestone-c4a*` reports). The active plan is **C4-LITE: a local-only
+> capture-integrity checker** (`milestone-c4-lite-capture-integrity-design.md`) — no
+> AI/AWS/network, neutral "Saved/Moment added", integrity-only negatives, **no semantic
+> shot/beat success claim**. The external `ValidationResult` schema object below still
+> exists; what changed is that **no inline semantic validation engine is built** and the
+> semantic Shot/Beat judgment moves to the future **asynchronous Asset Understanding**.
+> Mentions of `ValidationResult` in the mock/inventory sections below are unaffected
+> (they describe the schema object, not an inline engine).
+
 ------------------------------------------------------------------------
 
 # 0. Progress Snapshot (what is actually built)

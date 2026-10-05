@@ -6,6 +6,16 @@
 **Primary purpose:** Determine whether DIRECT produces useful, creative,
 scene-specific, feasible direction with minimum user effort.
 
+> **⛔ Shot-Validation scope update (2026-10-05, C4-Lite decision).** Where this document
+> lists `ValidationResults` as an evaluation input/output (Phase 3 Director-loop
+> simulation, data captured per run), note that **inline semantic Shot Validation was
+> rejected for the MVP** (`milestone-c4-go-no-go-audit.md`). The MVP capture loop emits
+> only a local **capture-integrity** signal (no semantic shot/beat success). Semantic
+> `ValidationResult`-style judgment — and its evaluation — moves to the future
+> **asynchronous Asset Understanding**. The C4A corpus, harness, four-axis research, model
+> comparison, and GO/NO-GO audit are preserved as that work's evaluation inputs. Treat the
+> `ValidationResults` mentions below as *historical/async*, not an inline MVP eval target.
+
 ---
 
 > **📎 LIVING SPECIFICATION — never "closed."** Unlike the Creative Intent /
