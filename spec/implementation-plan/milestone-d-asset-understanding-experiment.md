@@ -209,6 +209,162 @@ needed to do that is in place (subset, schema, runner, both transports proven).
 
 ---
 
+---
+
+# COST ACCOUNTING (added 2026-10-05)
+
+**Pricing basis (ESTIMATE):** AWS Bedrock on-demand, us-east-1, public per-1k-token
+pricing recorded **2026-10-05**: Nova Pro **$0.0008 in / $0.0032 out**; Nova Lite
+**$0.00006 / $0.00024**; Sonnet 4.6 **$0.003 / $0.015**; Opus 4.5 **$0.015 / $0.075**.
+TwelveLabs Pegasus per-token video pricing was not reliably determinable from the account
+→ marked ESTIMATE below, not fabricated. All $ are approximate. Raw per-call usage:
+`evals/results/au_density_cost.json` + `asset_understanding_exp.json` (gitignored).
+
+Measured token facts (exact, from the runs): Nova Pro frame-timeline ≈ **~733 input tok /
+frame** (8.9k @12fr → 71.5k @96fr; near-linear); Opus ≈ **~784 tok/frame** (18.8k @24fr,
+37.5k @48fr — Opus tokenizes images denser); output ≈ 400 tok (Nova) / 600–1200 (Opus/Sonnet);
+native video ≈ **2.3k tok (4s) → 27.5k (95s) → ~44k (154s)**.
+
+## Frame-density scaling — Nova Pro (8-clip subset, exact usage)
+
+| frames | event med | useful med | latency p50 | input tok | $/Moment | rel. vs 24fr |
+|---:|---:|---:|---:|---:|---:|---:|
+| 12 | 3.0 | 2.5 | 4.8s | 8,899 | **$0.0083** | 0.54× |
+| **24** | **4.0** | **3.0** | 9.1s | 17,695 | **$0.0154** | **1.0× (baseline)** |
+| 48 | 4.5 | 3.0 | 12.8s | 35,287 | $0.0296 | 1.9× |
+| 96 | 3.5 ⬇ | 2.0 ⬇ | 20.8s | 71,495 | $0.0584 | 3.8× |
+
+**Saturation point = ~24 frames.** 12→24 is a clear quality gain (events 3→4, useful 2.5→3)
+for ~2× cost — worthwhile. 24→48 adds only marginal richness (events 4→4.5) for ~2× cost —
+diminishing. **48→96 DEGRADES quality** (events 4.5→3.5, useful 3→2) at ~2× cost — strictly
+not worthwhile (too many stills dilute the read). So the densest representation is *worse*,
+not just not-worth-it. **Pick 24; 48 only if an annotation pass shows a real segmentation gain.**
+
+## Cost normalization (median $/Moment → Story sizes)
+
+| model / representation | $/Moment | 20 Moments | 50 Moments | 100 Moments |
+|---|---:|---:|---:|---:|
+| Nova Pro + 12 frames | $0.0083 | $0.17 | $0.41 | $0.83 |
+| **Nova Pro + 24 frames** | **$0.0154** | **$0.31** | **$0.77** | **$1.54** |
+| Nova Pro + 48 frames | $0.0296 | $0.59 | $1.48 | $2.96 |
+| Nova Pro + 96 frames | $0.0584 | $1.17 | $2.92 | $5.84 |
+| Opus 4.5 + 24 frames | $0.3374 | $6.75 | $16.87 | $33.74 |
+| Opus 4.5 + 48 frames | $0.6208 | $12.42 | $31.04 | $62.08 |
+
+$/minute-of-video is not a stable unit for frame-timeline (cost tracks frame COUNT, not
+duration — a duration-scaled budget caps frames), so $/Moment is the meaningful unit. For
+native video it would track duration; see Pegasus below.
+
+## Opus cost comparison (IDENTICAL 24-frame evidence)
+
+| metric | Nova Pro 24fr | Opus 4.5 24fr | delta |
+|---|---:|---:|---|
+| event recall (median) | 4.0 | **6.0** | +2 events (+50%) |
+| useful segments | 3.0 | 3.0 | — |
+| latency p50 | 9.1s | 19.8s | 2.2× slower |
+| $/Moment | $0.0154 | $0.3374 | **~22×** |
+| 100-Moment Story | $1.54 | **$33.74** | +$32.20 |
+
+**Quality gain per additional cost:** Opus buys ~+50% event granularity (and qualitatively
+sharper temporal language — it was one of the two arms that nailed reverse-reveal direction)
+for **~22× the per-Moment cost**. Answering the brief's own example question: a +50% event
+recall for 22× cost does **NOT** justify Opus on *every* Moment at MVP economics ($33.74 vs
+$1.54 per 100-Moment Story). Opus is a **quality ceiling / selective-use** candidate (e.g. only
+on long multi-event Moments where recall matters), not the default. Quality remains primary,
+but the tradeoff is explicit: Nova Pro 24fr is the cost/performance frontier; Opus is the
+ceiling.
+
+## Native Pegasus cost (ESTIMATE)
+
+Pegasus per-token video pricing wasn't reliably determinable from the account, so cost is an
+estimate. Operational facts measured: native path = whole-video → temp S3 → model → delete.
+- video duration handled: up to **154s** (the clip Nova native failed); rejects <~2s.
+- latency: 5–19s model-side (short→154s).
+- **S3 ancillary cost is trivial** (a 214MB object for <1 day ≈ well under $0.01 storage +
+  pennies of PUT/GET). **But the real cost is NOT dollars** — it is **mobile upload latency +
+  bandwidth** (a 214MB clip over cellular can take tens of seconds to minutes) and
+  **architecture complexity** (presigned upload, worker, cleanup). Do not collapse that into a
+  dollar figure.
+
+**Frame-timeline vs native — infrastructure implication:**
+- **Frame-timeline:** local frame extraction → **small request** (24 JPEGs ≈ a few MB) → model.
+  No whole-video upload. Fits even a synchronous path.
+- **Native video:** whole-video upload → temp S3 → model → delete. S3 $ small; upload
+  latency/bandwidth and operational complexity are significant.
+This is the decisive non-dollar factor favoring frame-timeline as the default.
+
+## Hierarchical analysis cost
+
+Not run as a separate multi-call arm (single-pass whole-timeline was sufficient on this
+corpus). Projected if adopted: PASS1 (coarse, ~12fr ≈ $0.008) + PASS2 (deeper on ~1–2 regions,
+~24fr ≈ $0.015 each) ≈ **$0.023–0.038/Moment on Nova Pro**, i.e. a ~1.5–2.5× multiplier and 2–3
+model calls per Moment. **Decision:** not justified yet — single-pass 24fr already clears the
+qualitative bar; revisit only if the annotation pass shows single-pass misses events on long
+multi-event clips.
+
+## Async infrastructure cost (MVP scale)
+
+Separate FIXED/IDLE from VARIABLE:
+- **A. App Runner + small frame-timeline requests:** fixed = the App Runner instance already
+  running for C1–C3 (no new idle cost); variable = the per-Moment model cost above. **Negligible
+  added fixed cost.**
+- **B. App Runner control plane + SQS/worker:** SQS at MVP volume is effectively free (first 1M
+  requests/mo free); a worker (small Fargate/Lambda) adds minor fixed/idle cost. At tens of
+  Moments/day this is **pennies/month fixed**.
+- **C. temp S3 + worker + native inference:** S3 transient storage negligible; worker as in B;
+  native inference cost ≈ frame-timeline or less in tokens, but upload bandwidth is the real cost.
+**At MVP scale the infra fixed cost is negligible; the variable per-Moment model cost dominates.**
+Don't over-model it.
+
+## Local-device cost (operational, not dollars)
+
+Frame extraction (the Swift AVFoundation sampler): ~0.7s per clip offline incl. decode on a Mac;
+on-device at capture the decode is already paid by the capture pipeline, so marginal cost is a
+few hundred ms + 24 small JPEG encodes. Resulting network bytes: **~1–3 MB** (24 frames) vs
+**19–214 MB** for whole-video upload — frame-timeline is ~10–100× less uplink. No fake $ assigned;
+battery/CPU impact is minor and bounded (not continuous).
+
+## FINAL quality / latency / cost frontier
+
+| approach | event recall | useful seg | temporal | valid | p50/p95 | $/Moment | $/50 | infra complexity |
+|---|---:|---:|---|---:|---:|---:|---:|---|
+| **Nova Pro 24fr (frame-timeline)** | 4.0 | 3.0 | good | 100% | 9.1s/~14s | **$0.0154** | **$0.77** | **low** (small request) |
+| Nova Pro 48fr | 4.5 | 3.0 | good | 100% | 12.8s | $0.0296 | $1.48 | low |
+| **Opus 4.5 24fr** | **6.0** | 3.0 | **sharpest** | 100% | 19.8s/~24s | $0.3374 | $16.87 | low |
+| Pegasus native | 3 | 2 | good (missed 1 arrival) | ~96% | 8.7s/~15s | ~est | ~est | **high** (upload+worker+S3) |
+| hierarchical (projected) | ~5 | ~3.5 | good | — | ~20s | ~$0.03 | ~$1.5 | medium (2 calls) |
+
+- **QUALITY CEILING:** **Opus 4.5 @ 24–48 frames** — best event recall + sharpest temporal
+  language, regardless of cost.
+- **COST/PERFORMANCE FRONTIER:** **Nova Pro @ 24 frames** — 100% valid, ~$0.015/Moment, good
+  temporal/segmentation, low infra, no clip-length ceiling.
+- **SIMPLEST ACCEPTABLE MVP:** **Nova Pro @ 24 frames, frame-timeline, via the existing async
+  worker** — clears the qualitative bar with the least architecture (no native-video upload
+  path). Pegasus-native is reserved for long multi-event Moments IF the annotation pass shows
+  frame-timeline misses events there.
+
+These are deliberately **three different answers**; the production pick (for review) is the
+frontier (Nova Pro 24fr) with Opus as an optional per-Moment escalation on long multi-event
+clips — not the cheapest (12fr degrades recall) and not the ceiling (Opus 22× cost).
+
+## THIS experiment's spend (actual, estimate)
+
+| item | calls | est cost |
+|---|---:|---:|
+| density/cost run — Nova Pro | 32 | $0.75 |
+| density/cost run — Opus 4.5 | 16 | $7.82 |
+| prior AU run (Nova/Sonnet, 26×~4 arms) | ~105 | $1.10 |
+| prior AU run — Pegasus | 25 | <$0.50 (est) |
+| transport/discovery probes (incl 1×44k native) | ~12 | $0.30 |
+| S3 (transient, 1-day lifecycle, emptied) | — | <$0.05 |
+| **TOTAL (estimate)** | **~190 calls** | **~$10.5** |
+
+**Under the $20 threshold.** Opus density was the dominant cost; I capped Opus at 24+48 frames
+(not all four densities) specifically to stay well under budget while still measuring the
+quality/cost delta — the Opus question only needs a fixed sensible density, not the full sweep.
+
+---
+
 ## Experiment hygiene
 - Temp S3 bucket `story-assetunderstanding-exp-…` : private (public-access-block), opaque keys,
   **1-day lifecycle**, each object **deleted immediately after its analysis**; bucket emptied at
