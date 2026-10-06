@@ -194,3 +194,132 @@ dogfood failure becomes a fixture here (§18 of the reconciliation).
 Experiment complete. No implementation, no Director change, no Edit Planner, no Music, no
 canonical-contract change. Next on approval: freeze `story_coverage/1` (with the restraint prompt
 tweak) and implement Story Coverage as a single Opus recompute call consuming MomentUnderstanding.
+
+---
+
+## FINAL DECISION (2026-10-06) — FREEZE THE ORIGINAL PRE-RESTRAINT OPUS PROMPT
+
+The Phase-0 restraint tweak was run (Opus-only, hybrid, same frozen fixtures) and **FAILED the gate**:
+
+| criterion | required | before (original) | after (restraint) |
+|---|---|---|---|
+| false-sufficient | 0 | **0** | 1 (A) ❌ |
+| false-insufficient | 0 | **0** | 0 |
+| missed worthwhile idea | 0 | **0** | 1 (A) ❌ |
+| unnecessary ideas ↓ | yes | 5 | 2 ✅ |
+| anti-checklist no regression | yes | J=null | J=idea ❌ |
+| structured validity | intact | 15/15 | 15/15 |
+
+Trading 3 fewer *safe optional* ideas (5→2) cost **1 false-sufficient + 1 missed worthwhile idea + 1
+anti-checklist regression** — exactly the dangerous errors the gate protects. On fixture A the restraint
+pressure made Opus *both* over-declare "sufficient" AND drop a genuinely worthwhile human-moment idea.
+Per the owner rule ("if restraint causes missed ideas or sufficiency regression: STOP, do not stack
+tweaks"), the restraint line is abandoned. **The ORIGINAL prompt is frozen** — it is the only
+configuration with 0 false-sufficient, 0 false-insufficient, 0 missed worthwhile ideas, no harmful
+template behavior, 15/15 validity. The restraint run is retained as regression/rationale evidence
+(`evals/results/story_coverage_models_restraint.json`).
+
+The 5 extra ideas are accepted for MVP as **SAFE OPTIONAL OVER-SUGGESTION** (on-theme, high-level,
+optional, non-camera-specific, on `workable` Stories, not completion gates) — not reasoning failures.
+
+### MVP Story Coverage error priority (most important to avoid, first)
+1. **false-sufficient** (prematurely silences useful guidance)
+2. **missed materially-worthwhile Story Idea** (a real opportunity goes unsurfaced)
+3. **false-insufficient / homework behavior** (turns Story into a checklist)
+4. **template/checklist requirement** (generic needs the intent never asked for)
+5. **safe optional over-suggestion** (on-theme optional idea on a workable Story)
+
+Do NOT optimize #5 at the expense of #1–#4. Suggestion frequency/presentation is a *separate* future
+concern, revisited in dogfood — not Coverage reasoning.
+
+### Reasoning vs intervention (architectural distinction, recorded)
+Story Coverage answers **"Is there a useful Story opportunity?"** The product may *later* separately
+answer **"Should we surface it right now?"** For MVP there is **no separate intervention-policy system**:
+no idea confidence scores, no frequency limits, no timers, no notification policy, no deterministic
+suppression thresholds. **Optional Figma presentation (hide the card when null) is sufficient restraint
+for MVP.** The frozen Coverage prompt is the ORIGINAL (no restraint clause).
+
+---
+
+## PRODUCTION-PATH GATE (2026-10-06) — implementation vs experiment baseline
+
+Ran the ACTUAL production engine (`RealStoryCoverageEngine` + real `BedrockModelGateway` tool-use,
+Opus 4.6, `story_coverage/v1` original prompt) over the frozen 15 fixtures.
+
+| metric | experiment baseline (1 run, plain-Converse) | production (tool-use), run 1 / run 2 |
+|---|---|---|
+| structured validity | 15/15 | 14/15 / **15/15** (one transient null-sufficiency, caught on repair) |
+| false-insufficient | 0 | 1 / **0** (H1 — run variance) |
+| false-sufficient | 0 | 1 / 1 (**fixture A only**) |
+| missed worthwhile idea | 0 | 1 / 1 (**fixture A only**) |
+| unnecessary (safe) ideas | 5 | 2 / 2 |
+| p50 latency | ~28s | ~26s |
+
+**Diagnosis of the A divergence (gate rule: STOP + diagnose before deploy).** Fixture A
+(all-scenery, intent = "the beauty and scale of the TMB") is **genuinely boundary-ambiguous**: across
+3 production calls the engine returned sufficient+idea, sufficient+null, workable+null. The intent
+literally asks for *beauty and scale*, which strong scenery arguably already satisfies — so the model
+legitimately wobbles across the sufficient/workable line, and the human reference ("workable + suggest
+a human moment") is itself a defensible-but-disputable grader call. This is **fixture-boundary variance
+on one ambiguous case, not a stable regression of the frozen reasoning**: production matches the
+experiment on the 13 unambiguous fixtures, false-insufficient is 0, and the experiment's single run
+simply sampled A's "workable+idea" outcome. Hardening applied (general, not fixture-tuning): Coverage
+in-call structured repair raised 1→2 (removes the transient null-sufficiency). **Open judgment call for
+the owner:** whether A's boundary wobble counts as a "material regression" that should block deploy, or
+is accepted as a known-ambiguous fixture (recorded here, kept as a regression fixture, revisited in
+dogfood). Everything else matches baseline.
+
+---
+
+## Phase 1 (post-freeze) — Fixture A classified semantic-envelope; production gate PASSED (2026-10-06)
+
+Owner decision (2026-10-06): **Fixture A is a KNOWN-AMBIGUOUS semantic-boundary
+fixture, NOT a material production regression.** A's CreativeIntent is explicitly
+"the beauty and scale of the TMB" over strong scenery material, so both
+`workable + optional complementary idea` and `sufficient + null` are semantically
+defensible; repeated production runs (sufficient+idea / sufficient+null /
+workable+null) confirmed a genuine narrative judgment boundary, not a stable model
+failure. The frozen prompt/model/schema/engine were NOT changed — this was a
+HARNESS-ONLY classification change.
+
+**Harness change (minimal):** every fixture now carries an explicit `eval_mode`
+(`strict` | `semantic_envelope`). 14 fixtures are `strict` (exact human-reference
+expectations). A is `semantic_envelope` with an acceptable set
+{sufficiency ∈ workable|sufficient; story_idea ∈ null|one optional complementary},
+a forbidden set (insufficient / "scenery missing" / request-more-scenery /
+mandatory-companionship / template / camera-direction / intent-contradiction), and
+a `decision_note` recording the original human reference, the observed variance,
+why ambiguity was accepted, and the owner date. The original human_reference is
+preserved verbatim; history is not rewritten.
+
+**Production gate re-run (Opus 4.6, original prompt, hybrid, model/prompt/schema/engine UNCHANGED):**
+
+| group | metric | result |
+|---|---|---|
+| STRICT (n=13 valid) | false-sufficient | **0** |
+| STRICT | false-insufficient | **0** |
+| STRICT | missed worthwhile idea | **0** |
+| STRICT | unnecessary (safe-optional) ideas | 3 (accepted MVP class #5) |
+| SEMANTIC-ENVELOPE (A) | within envelope | **1/1** (sufficient + null) |
+| all | structured validity | 14/15 (B transient null-sufficiency → designed-safe 503/keep-cache) |
+| all | p50 latency | ~24 s |
+
+No previously-strict fixture showed meaningful semantic variance into a dangerous
+direction (J/C/K produced on-theme, non-forbidden ideas; J's "unnecessary" idea
+stays entirely within solitude — zero forbidden hits). **Gate PASSED.** No further
+fixture was auto-classified ambiguous; future ambiguity classification requires
+explicit owner review.
+
+### Error priority (frozen for MVP)
+1. false-sufficient (silences useful help) — avoid most
+2. missed materially-worthwhile Story Idea
+3. false-insufficient / homework behavior
+4. template/checklist requirement
+5. safe optional over-suggestion (tunable later, do NOT optimize at the expense of 1–4)
+
+### Reasoning vs intervention (architectural note)
+Story Coverage answers "is there a useful opportunity?". A future, separate layer
+may answer "should we surface it right now?". MVP builds NO intervention-policy
+system (no idea confidence scores, frequency limits, timers, notification policy,
+or deterministic suppression thresholds) — optional Figma presentation is
+sufficient restraint.
