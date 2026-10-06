@@ -820,52 +820,27 @@ GeneratedOutput
 persist locally
 ```
 
-### AssetUnderstanding: eager and parallel
+### AssetUnderstanding: on-device job queue (MVP, FROZEN 2026-10-05)
 
-> **SUPERSEDED for MVP (2026-10-05) — see `06-asset-understanding.md` (FROZEN).** The eager
-> server-side Bedrock fan-out described below is NOT the MVP AU model. MVP AU runs as an
-> **on-device persistent job queue**: each Moment enqueues a local AU job at add-time; the job
-> extracts 24 timestamped frames locally and posts a small (~1–3 MB) request to the existing App
-> Runner `/v1/asset-understanding` endpoint when execution/network conditions permit; the result
-> persists locally. Moment creation never blocks on AU. There is NO Create-My-Story server
-> fan-out, NO per-Moment eager cloud dispatch, NO SQS/worker/temp-S3. The two-phase text below is
-> retained only as historical context for the pre-experiment design.
-
-**Rule: AssetUnderstanding must never be computed serially at Create
-My Story time.**
-
-The correct strategy is two-phase:
-
-**Phase 1 — eager analysis (at Moment add time):**
+Authoritative design: `06-asset-understanding.md`. Asset Understanding runs as a **persistent
+on-device job queue**, not a server-side fan-out:
 
 ``` text
-addMoment() or shootMoment()
-→ dispatch AssetUnderstanding for that Moment immediately
-→ store result locally; mark Moment as analyzed
+Moment added
+→ local persistent AU job queued   (Moment creation NEVER blocks on AU)
+→ opportunistic analysis: local 24-frame extraction → small (~1–3 MB) request
+  → existing App Runner /v1/asset-understanding → Sonnet 4.6 → MomentUnderstanding
+→ MomentUnderstanding cached locally
 ```
 
-Each Moment is analyzed when it arrives, not when the user taps Create.
-By Create time, all cached results are already available.
+`Create My Story` **consumes whatever `MomentUnderstanding` is already available locally**; it
+does not itself trigger a server-side AU fan-out. The individual model call is synchronous
+(p50 ~26s, well inside the 120s App Runner budget), while the product workflow is asynchronous
+via the queue. There is **no** eager per-Moment cloud dispatch, **no** concurrent N-Moment
+Bedrock fan-out at Create time, **no** SQS/worker/temp-S3 for AU.
 
-**Phase 2 — gap fill (at Create My Story, concurrent):**
-
-If any Moments were added while analysis was offline or failed, analyze
-the missing ones before proceeding. All missing Moments must be analyzed
-**concurrently** — fan out Bedrock calls in parallel, not sequentially.
-
-``` text
-Create My Story triggered
-→ identify Moments without AssetUnderstanding
-→ fan out Bedrock calls concurrently (asyncio.gather / concurrent.futures)
-→ await all results
-→ proceed to Story reconciliation
-```
-
-Serializing Bedrock calls (one Moment at a time) is a correctness
-violation, not just a performance issue: 10 uncached Moments analyzed
-serially at ~8s each exceeds the App Runner 120s timeout. Concurrent
-calls bound total analysis time to the slowest single call (~8s)
-regardless of Moment count.
+> Exact gap-fill behaviour for any Moment still `PENDING` at Create time belongs to the future
+> Create/Edit pipeline design and must NOT silently resurrect server-side N-Moment fan-out.
 
 `Create My Story` never changes `Story.status`.
 
@@ -1059,16 +1034,19 @@ worker path before it begins returning 502s to iOS clients.
 | Model Gateway retries | > 10% of calls | Provider degraded; check Bedrock status page |
 | AI cost per operation | Spike > 3× baseline | Unexpected prompt growth or wrong model routed |
 
-### Create My Story / AssetUnderstanding
+### Asset Understanding (on-device queue) / Create My Story
 
 | Metric | Alarm | Action |
 |---|---|---|
-| Create My Story end-to-end latency p95 | > 45s | Check uncached Moment count; verify eager analysis is running |
-| Moments with missing AssetUnderstanding at Create time | > 0 | Eager analysis is broken; fix the add-Moment analysis path |
-| Concurrent Bedrock calls per Create request | < N-1 (N = Moment count) | Analysis is serializing; fix fan-out |
+| `/v1/asset-understanding` latency p95 | > 60s | Slow model/prompt; check Sonnet latency + frame payload size |
+| AU structured-output validity after retry | < ~95% | Prompt/schema regression; run the frozen ground-truth gate |
+| AU retry rate (one-retry policy) | > 15% of calls | Provider degraded or output-token cap too low |
+| Create My Story end-to-end latency p95 | > 45s | Create consumes locally-cached MomentUnderstanding only; investigate the client, not a server AU fan-out |
 
-Eager caching is the primary defence against slow Create My Story.
-Monitor it as a first-class operational concern, not an afterthought.
+AU is an **on-device, opportunistic, resumable** job queue (see §AssetUnderstanding). The server
+sees one small 24-frame request per job; there is no eager server-side caching layer and no
+concurrent N-Moment fan-out to monitor. Create My Story consumes whatever MomentUnderstanding is
+already cached locally.
 
 ### S3 and media
 

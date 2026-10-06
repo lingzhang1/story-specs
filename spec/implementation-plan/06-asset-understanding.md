@@ -282,9 +282,11 @@ Design + implementation detail in `milestone-d-photos-persistence.md`. Summary:
 successful Moment → Story working copy remains → original also saved to **Apple Photos
 (add-only)**, fire-and-forget, never blocking or failing Moment creation; graceful degradation
 on denial/failure; no full Photos read permission; duplicate storage accepted for MVP.
-`PhotosSaver.swift` + the `NSPhotoLibraryAddUsageDescription` key are implemented; **open
-item:** add `PhotosSaver.swift` to the Xcode project target. Physical-iPhone checklist in that
-doc. This is deliberately **not entangled** with AU model selection.
+`PhotosSaver.swift` + the `NSPhotoLibraryAddUsageDescription` key are **implemented and complete**.
+The Story iOS project uses `PBXFileSystemSynchronizedRootGroup` (objectVersion 77): every `.swift`
+under `Story/` is automatically target-included, so `PhotosSaver.swift` compiles with **no manual
+pbxproj edit** — there is no Xcode wiring open item. The only remaining step is the **physical-iPhone
+verification** (checklist in that doc). This is deliberately **not entangled** with AU model selection.
 
 ---
 

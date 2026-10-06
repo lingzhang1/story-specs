@@ -332,14 +332,12 @@ Design for this:
 
 - Interactive AI operations (scene scan, shot plan, story ideas) must
   complete in well under 120s — typically 5-25s
-- `AssetUnderstanding` is computed eagerly when each Moment is added,
-  not at Create My Story time; by Create time all results are cached
-  <!-- SUPERSEDED for MVP (2026-10-05): see 06-asset-understanding.md (FROZEN).
-       MVP AU is an ON-DEVICE persistent job queue posting a small 24-frame request to the
-       EXISTING App Runner /v1/asset-understanding endpoint — NOT an eager server-side cloud
-       dispatch and NOT a Create-My-Story fan-out. No temp-S3 / presigned upload / SQS /
-       Lambda-Fargate worker / Bedrock async for AU. The SQS→Lambda/Fargate guidance in this
-       doc still applies to OTHER future heavy jobs (generative media, rendering), not to AU. -->
+- `AssetUnderstanding` runs as an **on-device persistent job queue** (MVP, FROZEN —
+  `06-asset-understanding.md`): a small 24-frame request to the existing App Runner
+  `/v1/asset-understanding` endpoint, opportunistic/resumable, result cached locally. It is NOT an
+  eager server-side cloud dispatch and NOT a Create-My-Story fan-out. No temp-S3 / presigned upload
+  / SQS / Lambda-Fargate worker / Bedrock async for AU; that scaling guidance applies to OTHER
+  future heavy jobs only.
 - Bedrock calls for multiple Moments must run **concurrently** (fan-out),
   not serially; see the OPS/Metrics section in `03-system-architecture.md`
 - Any operation that cannot reliably complete in 90 seconds must be
@@ -1181,9 +1179,15 @@ Secrets Manager
 ECR (container image)
 ```
 
-AssetUnderstanding runs eagerly on Moment add. Create My Story fans out
-Bedrock calls in parallel. All interactive operations complete within
-the 120-second App Runner timeout.
+For MVP, **Asset Understanding runs as an on-device persistent job queue** (see
+`06-asset-understanding.md`, FROZEN): each job extracts 24 timestamped frames locally and posts a
+small (~1–3 MB) request to the **existing** App Runner `/v1/asset-understanding` endpoint
+opportunistically; the result caches locally. **No** SQS, **no** Lambda/Fargate AU worker, **no**
+temporary video S3, **no** presigned AU upload, **no** server-side eager/fan-out AU. Each model
+call is synchronous and completes within the 120-second App Runner budget; the product workflow is
+asynchronous via the on-device queue. Create My Story consumes locally-cached MomentUnderstanding.
+The general SQS/Lambda/Fargate guidance below remains valid for OTHER future heavy workloads
+(generative media, rendering), not for AU.
 
 ### Phase C — Operational async work
 
