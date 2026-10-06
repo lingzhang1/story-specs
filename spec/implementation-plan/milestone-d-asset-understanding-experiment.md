@@ -371,3 +371,172 @@ quality/cost delta — the Opus question only needs a fixed sensible density, no
   end. Derived frames lived under the gitignored `private_local/frames/au` and were deleted. No
   permanent cloud media. No canonical contract touched. No async infra built. No Music/Edit
   Planner. STOP.
+
+
+---
+
+# FINAL GROUND-TRUTH EVALUATION — AU model selection (2026-10-05)
+
+The intelligence/transport and density/cost experiments above established the frame-timeline
+candidate (24 timestamped frames, Nova Pro) qualitatively. This final gate scores FOUR finalists
+against **owner-approved human ground truth** — the one thing missing before a model can be frozen.
+
+**Verdict: the earlier qualitative read was partly wrong. Nova Pro is the WEAKEST on grounded
+understanding; a reasoning model (Opus 4.6 or Sonnet 4.6) is materially better from the SAME 24
+frames — a model-limited gap, not evidence-limited. Native video (Pegasus) recovers nothing the
+frame timeline loses. Recommendation below is a genuine product tradeoff, NOT auto-cheapest.**
+
+## 1. Annotation subset (18 clips)
+Drawn from the AU subset; full coverage: short (6) / medium (5) / long (6, incl. 95s + 154s) +
+temporal (departure/arrival/reveal/progression/contradiction), semantics (difficulty/companionship/
+end-of-day/wrong-people/beautiful-wrong-purpose/useful-elsewhere), multi-event (S07_A, S08_D), and
+controls (static backpack ×2, camera-points-away, shared-source A01/A06). Easy + hard mixed.
+
+## 2–3. Ground truth + owner review — APPROVED
+AI-proposed annotations were visually grounded via timestamped contact sheets (not filenames), then
+**owner-reviewed and approved 2026-10-05** with 6 rulings applied:
+1. S02_A departure begins at **gear-up (0s)**, not the walk-out.
+2. S02_D = **departure / threshold-crossing**.
+3. S07_A = **companionship partial + useful_elsewhere**.
+4. S08_D = **eating a pouch meal, NOT cooking** (filename 'cooking' is a hallucination trap, kept as-is).
+5. S08_F = **breakfast, not dinner**; strong_elsewhere (window vista is the payoff).
+6. S04_A = tiny person **confirmed present** (recall probe).
+Fixture filenames are kept as-is on purpose — they encode the *requested capture intent*, not the
+footage content; that mismatch IS the semantic test. Frozen as `au.ground_truth/1-approved`
+(`evals/asset_understanding/ground_truth.json`).
+
+## 4. Finalists (controlled)
+All three frame-timeline arms got **IDENTICAL** evidence: 24 ordered timestamped frames, same
+resolution/compression/prompt/schema — a pure MODEL comparison (no density sweep).
+- **A ft_nova_pro** `amazon.nova-pro-v1:0`
+- **B ft_sonnet** `us.anthropic.claude-sonnet-4-6`
+- **C ft_opus** `us.anthropic.claude-opus-4-6-v1` — strongest **invocable** Opus. (`opus-5-5` is listed
+  in inference profiles but returns **AccessDenied** on invoke; §4C "discover, don't assume" paid off.)
+- **D nv_pegasus** `us.twelvelabs.pegasus-1-2-v1:0` — native whole video (S3 source).
+
+## 5–6. Ground-truth metrics (LLM judge, Nova Pro, tolerant ±3s temporal matching; NO output repair)
+
+| arm | event P | event R | **F1** | halluc | over-seg | **temporal (order)** | seg cov | **valid rate** | p50/p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Nova Pro 24fr | 0.54 | 0.59 | **0.56** | 35 | 47 | **9/18** | 0.70 | **18/18** | 9.8/13.7s |
+| Sonnet 4.6 24fr | 0.78 | 0.85 | **0.80** | 10 | 52 | **16/17** | 0.81 | 17/18 | 26/33s |
+| Opus 4.6 24fr | 0.73 | 0.78 | **0.75** | 17 | 55 | **17/18** | 0.78 | **18/18** | 30/38s |
+| Pegasus native | 0.66 | 0.72 | 0.68 | 30 | **22** | 10/17 | **0.83** | 17/18 | 9.3/16.6s |
+
+- **SEMANTIC QUALITY (valid outputs):** Sonnet best F1 (0.80) + fewest hallucinations (10); Opus best
+  temporal (17/18) + best Story-semantics (story_utility 17/18, shot-contribution 8/18). Nova Pro worst
+  on every understanding axis (F1 0.56, **35 hallucinations**, temporal **9/18**) — it emitted 24 events
+  on a 6s clip and 12 on a 10s clip (gross over-segmentation).
+- **RELIABILITY (end-to-end, no repair):** Nova 18/18, **Opus 18/18**, Sonnet **17/18** (truncated the
+  154s clip at the output-token cap → invalid JSON — its known structured-output weakness), Pegasus
+  17/18 (hard `ValidationException` on the 2.0s clip — too short for native video).
+- **Temporal note:** the judge's raw boolean conflated "order correct" with "matched requested shot";
+  corrected from the judge's own rationale text, true temporal-ORDER accuracy is Opus 17/18, Sonnet
+  16/17, Nova 9/18, Pegasus 10/17. All four correctly read the reverse-reveal (landscape→person) and
+  the arrival-not-departure case *as events* — but Nova/Pegasus failed the subtler contradiction/scale
+  ordering that Opus/Sonnet nailed.
+
+## 7. Model-limited vs evidence-limited (REQUIRED)
+Because A/B/C share the exact 24 frames: where Nova missed a GT event that Sonnet and/or Opus caught
+from the **same frames**, the limit is **reasoning, not evidence** — this dominates (≈17 such cases;
+count is directional, cross-arm label matching is soft). Where ALL three frame arms missed something
+Pegasus-native caught: **≈0**. **Conclusion: the 24-frame timeline is NOT evidence-starved for this
+corpus; the gap between Nova and the reasoning models is model-limited.** Native continuous video did
+not recover temporal/event information the timeline lost (Pegasus temporal 10/17 < Opus/Sonnet). This
+is the decisive architectural result: **richer evidence (native video) is not the lever; a stronger
+reasoner on the same frames is.**
+
+## 8. Cost (real measured tokens; us-east-1 on-demand, recorded 2026-10-05 — ESTIMATE)
+
+| arm | $/Moment | $/20 | $/50 | $/100 | notes |
+|---|---:|---:|---:|---:|---|
+| Nova Pro 24fr | $0.0164 | $0.33 | $0.82 | $1.64 | med 18.6k in / 0.5k out |
+| Sonnet 4.6 24fr | $0.0799 | $1.60 | $4.00 | $7.99 | med 19.6k in / 1.4k out |
+| **Opus 4.6 24fr** | **$0.3956** | **$7.91** | **$19.78** | **$39.56** | med 19.6k in / 1.35k out |
+| Pegasus native | ~$0.03 (est) | ~$0.6 | ~$1.5 | ~$3 | **video-token $ not exposed** via InvokeModel → estimate; + whole-video upload/S3/worker |
+
+**Opus is ~24× Nova and ~5× Sonnet per Moment.** Pegasus dollar cost is small but its real cost is
+**operational**: whole-video mobile upload (19–214 MB vs ~1–3 MB of frames), temp S3, async worker,
+cleanup/lifecycle, a second model path + second eval surface — none of which the frame arms need.
+
+## 9. Frontier — three different answers (as the brief predicted)
+- **QUALITY CEILING:** **Sonnet 4.6** has the best event F1/hallucination, **Opus 4.6** the best
+  temporal + Story-semantics + reliability. The reasoning ceiling is clearly ABOVE Nova, from identical
+  frames. If one must name a single ceiling: **Opus 4.6** (best temporal + Story-contribution + 100%
+  valid), with Sonnet a close, cheaper, slightly-less-reliable alternative.
+- **COST/PERFORMANCE FRONTIER:** **Sonnet 4.6 @ 24fr** — ~80% of Opus's understanding (actually higher
+  event F1) at **1/5 the cost** ($4 vs $19.78 / 50 Moments) and faster, but **17/18 reliability** is the
+  catch. OR **Opus @ 24fr** if 100% structured reliability is required and $20/50-Moments is acceptable
+  for dogfood.
+- **SIMPLEST ACCEPTABLE MVP:** **Nova Pro @ 24fr** is cheapest/fastest/most-reliable but **does NOT
+  clear the quality bar** — F1 0.56, 35 hallucinations, temporal 9/18. For an understanding layer that
+  feeds the Director and a future Edit Planner, Nova's hallucination/temporal weakness is a real risk.
+
+## 10. Final model recommendation — ONE path
+**Recommend Opus 4.6 @ 24-frame timeline as the single MVP/dogfood Asset Understanding model**, OR
+**Sonnet 4.6 @ 24fr** if cost/latency matters more than perfect structured reliability. Rationale:
+- Nova is tempting (cheap, 100% valid) but its grounded quality is the worst of the four — and AU
+  output is *consumed* by Director reasoning and the future Edit Planner, where 35 hallucinated events
+  and 9/18 temporal accuracy propagate downstream. Per §10C, do not sacrifice core intelligence to
+  minimize early dogfood cost: at MVP volumes (tens of Moments/Story) Opus is **$8–20 per Story**, Sonnet
+  **$1.6–4** — affordable for the quality gained.
+- **No routing.** Duration did not predict semantic difficulty (the 6s S04 and 10s S02_D broke Nova
+  harder than the 154s clip broke Opus). A second path (Nova-normal / Opus-long) would add logic,
+  a failure surface, a model dependency and an eval problem it did not earn. **One model, all durations.**
+- **Pegasus / native video is NOT justified.** Marginal-to-negative quality vs the frame reasoners,
+  worst-of-both on temporal, and it alone demands upload/S3/worker/lifecycle infrastructure. §10D's bar
+  ("native materially improves because the timeline loses information") is **not met** — §7 shows the
+  timeline is not the bottleneck.
+
+**Open product question for you:** Opus (100% reliable, +temporal, ~$8–20/Story) vs Sonnet (cheaper,
+higher event F1, but 17/18 reliability — the one failure was recoverable with a higher output-token cap
+or a retry). My lean: **Sonnet 4.6 with a retry-on-invalid guard** gets the best understanding at 1/5
+Opus cost; fall back to **Opus** if you want zero structured-output failures without a retry layer.
+
+## 11. Infrastructure consequence
+A frame-timeline model wins → **simplest architecture**: iPhone extracts 24 timestamped frames
+locally → small (~1–3 MB) AU request → selected model → MomentUnderstanding. **No whole-video S3
+upload, no Fargate/Lambda video worker, no temp-media lifecycle.** AU stays *logically* async/resumable
+as a **persistent on-device job queue** that posts the small frame request to the existing App Runner
+inference endpoint when network permits — the individual model call completes synchronously (p50 9–30s,
+well under App Runner's 120s), while the product workflow remains asynchronous. MVP needs **no** server
+SQS / worker / temp S3. (If native video were ever adopted, only THEN build device→presigned-S3→async
+job→native model→delete + lifecycle backstop — not now.)
+
+## 12. MomentUnderstanding contract recommendation (minimum, consumer-justified)
+Keep only fields with a real consumer (Story Coverage / Director / future Edit Planner):
+- **summary** — Coverage/Director quick read ✅
+- **subjects** — Coverage ✅
+- **events[] (t_start, t_end, description)** — Edit Planner candidate material ✅
+- **temporal_order_note** — Director (departure/arrival/reveal direction) ✅
+- **useful_segments[] (start, end, why)** — Edit Planner inputs ✅ (the single most load-bearing field)
+- **story_utility (none/useful_elsewhere/strong_elsewhere)** — Coverage/Director ✅
+- **requested_shot_contribution / requested_beat_contribution** — Director ✅ (keep SEPARATE from
+  observed events — observed reality is request-independent; contribution is the Story-context judgment)
+- **DROP for MVP:** `environment` (subsumed by summary; no distinct consumer), `dead_or_setup_segments`
+  (weakly detected across all models — segcov driven by useful_segments; revisit when the Edit Planner
+  actually needs trim hints). This is a RECOMMENDATION; canonical contracts are NOT modified here.
+
+## 13. Photos persistence — see companion doc
+Implemented as an independent product-safety task: `milestone-d-photos-persistence.md` (add-only
+`PhotosSaver`, fire-and-forget from `persistMoment`, migration-free, `swiftc -parse` clean). Open item:
+add `PhotosSaver.swift` to the Xcode project. Not entangled with AU model selection.
+
+## 14. This evaluation's spend (ESTIMATE, us-east-1 on-demand 2026-10-05)
+- Nova finalist: 18 calls ~$0.30 · Sonnet: 18 ~$1.44 · **Opus: 18 ~$7.12 (dominant)** · Pegasus: 18
+  ~$0.54 (video-token $ unknown → estimate) · Nova judge: 71 ~$0.25 · probes + S3 ~$0.10.
+- **Total ≈ $9.74** — under the $20 gate (projected $8.25 beforehand; Opus output tokens ran higher).
+  Pricing marked ESTIMATE; Pegasus per-video-token pricing not reliably determinable → flagged, not
+  fabricated.
+
+## Are we ready to freeze AU? (§20 from the prior report, now answered)
+**YES — the model-selection gate is cleared.** We have human-approved ground truth and a controlled,
+scored comparison. The remaining decision is the **one product call in §10** (Opus vs Sonnet). Once you
+pick, the AU design can freeze on: **one reasoning model @ 24-frame local timeline, no native video, no
+routing, on-device async queue + existing App Runner endpoint**, with the §12 minimum
+MomentUnderstanding contract. The only data gap that could still move the needle is more ground-truth
+clips (18 → ~30) if you want tighter confidence intervals before committing — optional, not blocking.
+
+Experiment hygiene: temp S3 emptied (per-clip immediate delete + 1-day lifecycle backstop), derived
+finalist frames deleted, no permanent cloud media, no canonical contract modified, no async infra
+built, no Music/Edit Planner. STOP.
