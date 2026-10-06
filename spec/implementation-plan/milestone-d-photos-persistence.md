@@ -48,10 +48,19 @@ and would couple to the persistence layer. For MVP the outcome is logged only. *
 (flagged, not done):** add an optional `photosSaveState` field when a consumer needs it
 (e.g. a UI "saved to Photos" badge or a retry queue). Not required for the trust fix.
 
-## Open item for the user (same class as StoryContracts.swift)
-`PhotosSaver.swift` is a NEW file. Add it to the Xcode project (Story target → Media/Photos
-group) before building — the agent sandbox cannot safely edit the project's file graph.
+## Xcode wiring — RESOLVED (no manual edit needed)
+**Correction (2026-10-05):** the earlier "add the new file to the Xcode project" open item (for
+both `PhotosSaver.swift` and `StoryContracts.swift`) was based on the classic explicit-reference
+project format. This project is actually **objectVersion 77 with
+`PBXFileSystemSynchronizedRootGroup`** (the `Story/` folder is synchronized; the pbxproj has
+**zero** explicit `.swift` references and the only membership exception is `Info.plist`). Every
+`.swift` under `Story/` — including `Story/Media/Photos/PhotosSaver.swift` and
+`Story/Data/Contracts/StoryContracts.swift` — is **auto-included in the target and compiles with
+no pbxproj edit**. No manual Xcode file-graph change is required or should be made.
 `swiftc -parse` is clean on the new file and the modified flow.
+
+The only remaining step is the **physical-iPhone verification** (checklist below) — which only
+the user can run.
 
 ## Recommended eventual Photos-save behaviour
 Add-only auto-save of the original on successful capture is the right default (implemented).

@@ -334,6 +334,12 @@ Design for this:
   complete in well under 120s — typically 5-25s
 - `AssetUnderstanding` is computed eagerly when each Moment is added,
   not at Create My Story time; by Create time all results are cached
+  <!-- SUPERSEDED for MVP (2026-10-05): see 06-asset-understanding.md (FROZEN).
+       MVP AU is an ON-DEVICE persistent job queue posting a small 24-frame request to the
+       EXISTING App Runner /v1/asset-understanding endpoint — NOT an eager server-side cloud
+       dispatch and NOT a Create-My-Story fan-out. No temp-S3 / presigned upload / SQS /
+       Lambda-Fargate worker / Bedrock async for AU. The SQS→Lambda/Fargate guidance in this
+       doc still applies to OTHER future heavy jobs (generative media, rendering), not to AU. -->
 - Bedrock calls for multiple Moments must run **concurrently** (fan-out),
   not serially; see the OPS/Metrics section in `03-system-architecture.md`
 - Any operation that cannot reliably complete in 90 seconds must be

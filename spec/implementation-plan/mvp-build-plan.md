@@ -823,20 +823,31 @@ It should never require users to satisfy suggestions before creating.
 
 # 14. Milestone H --- Asset Understanding
 
+> **DESIGN FROZEN 2026-10-05 — see `06-asset-understanding.md` (implementation-ready).**
+> MVP AU is **Sonnet 4.6 (`us.anthropic.claude-sonnet-4-6`) over 24 ordered timestamped
+> frames**, one model, no routing/escalation, no native video, retry-once (no Opus/Nova
+> fallback). Architecture: **on-device persistent AU job queue → local 24-frame extraction →
+> small (~1–3 MB) request → EXISTING App Runner → `AssetUnderstandingEngine` → generic
+> `ModelGateway` → Sonnet → `MomentUnderstanding` persisted locally**. **No** temp-S3 /
+> presigned upload / SQS / Lambda-Fargate worker / Bedrock async (they did not earn their
+> complexity — see the three Milestone-D experiment reports). Moment creation never blocks on
+> AU. Build NOT started; bring the frozen design to review before implementation.
+
 Build media analysis shared by persistent Story and existing-media
 creation.
 
-For each asset, extract only useful MVP information:
+The frozen **MomentUnderstanding** contract (minimum, consumer-justified) keeps, in two
+conceptually separated groups:
 
--   duration
--   semantic description
--   scene
--   people/actions
--   basic quality
--   usable segment(s)
--   potential narrative role
+- **observed / asset-grounded:** `summary`, `subjects[]`, `events[]` (start_time, end_time,
+  description), `temporal_order_note`, `useful_segments[]` (start_time, end_time, why_useful —
+  asset-grounded candidate material, NOT final cuts);
+- **Story-context interpretation:** `story_utility`, `requested_shot_contribution`,
+  `requested_beat_contribution`.
 
-For video, identify useful ranges where practical.
+Dropped for MVP: `environment`, `dead_or_setup_segments` (no distinct consumer in the final
+experiment). `useful_segments` stays asset-grounded; final selection/ordering belongs to the
+future Edit Planner. For video, identify useful ranges where practical.
 
 This package should be designed so it can later grow into large-library
 indexing without building that system now.
@@ -859,6 +870,33 @@ Implement:
 
 Music is an input to edit planning, not merely an audio track added
 after editing.
+
+## Music / Create Story Gate
+
+Music is a first-class input to Story creation, not a post-render audio
+overlay.
+
+Before implementing the real Edit Planner / Create Story pipeline, complete
+the dedicated Music design covering:
+
+- MusicDirection contract
+- MusicAsset contract
+- curated MVP catalog
+- recommendation
+- preview / user override UX
+- beat / section analysis
+- music-aware EditPlan integration
+- track-change → replan behavior
+- storage / delivery
+- licensing constraints
+- evaluation
+
+MVP may begin with approximately 5–10 curated tracks.
+
+Do not implement the final Edit Planner assuming music can simply be added
+after editing.
+
+Music selection remains outside Story Director v1 / DIRECT capture.
 
 ------------------------------------------------------------------------
 
@@ -992,6 +1030,20 @@ Human evaluation questions:
 -   Is the capture effort justified?
 
 Keep evaluation artifacts under `evals/`.
+
+### Evaluation requirement
+
+Before significant prompt/model tuning, establish the milestone's curated
+evaluation fixture set.
+
+Before closing the milestone, every meaningful newly observed failure must
+either:
+
+- become a regression fixture; or
+- be explicitly documented as intentionally unsupported/deferred.
+
+Run the complete relevant evaluation suite before advancing to the next
+intelligence milestone.
 
 ------------------------------------------------------------------------
 
@@ -1318,3 +1370,6 @@ across four connected jobs:
 
 The product should feel like one AI Story Director across these jobs,
 not four disconnected tools.
+
+
+

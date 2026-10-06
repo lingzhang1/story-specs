@@ -13,8 +13,16 @@ scene-specific, feasible direction with minimum user effort.
 > only a local **capture-integrity** signal (no semantic shot/beat success). Semantic
 > `ValidationResult`-style judgment — and its evaluation — moves to the future
 > **asynchronous Asset Understanding**. The C4A corpus, harness, four-axis research, model
-> comparison, and GO/NO-GO audit are preserved as that work's evaluation inputs. Treat the
+>> comparison, and GO/NO-GO audit are preserved as that work's evaluation inputs. Treat the
 > `ValidationResults` mentions below as *historical/async*, not an inline MVP eval target.
+>
+> **Asset Understanding evaluation (2026-10-05) now exists and is FROZEN.** The async
+> semantic layer referenced above has its own human-reviewed ground truth
+> (`evals/asset_understanding/ground_truth.json`, `au.ground_truth/1-approved`, 18 clips),
+> scorer (`evals/score_au_finalists.py`), and model-selection gate (Sonnet 4.6 @ 24 frames —
+> see `06-asset-understanding.md` §12 and `milestone-d-asset-understanding-experiment.md`).
+> That is the regression gate for any AU model/frame/prompt/schema change; it is independent
+> of this Director-focused document.
 
 ---
 
@@ -34,6 +42,252 @@ scene-specific, feasible direction with minimum user effort.
 > not judged by demo feel.
 
 ---
+
+# Evaluation Dataset Lifecycle
+
+The evaluation dataset is not a one-time benchmark assembled before
+implementation.
+
+It grows continuously with the product.
+
+Story uses three primary sources of evaluation data.
+
+## 1. Curated Design Fixtures
+
+Before implementing or tuning each AI component, create a small,
+deliberately diverse fixture set covering the behaviors that component is
+expected to handle.
+
+Initial targets are guidelines, not hard requirements:
+
+- Creative Intent: ~30–50 representative intent cases
+- Scene Understanding: ~20–30 representative real scene scans
+- Story Director: controlled Intent × Scene combinations plus Director-loop
+  cases
+
+Diversity and failure coverage are more important than dataset size.
+
+Fixtures should describe expected and forbidden semantic properties rather
+than pinning exact model prose.
+
+Do not design the fixture set around the first model's outputs.
+
+The purpose of the initial fixture set is to establish expected product
+behavior before prompt/model tuning begins.
+
+---
+
+## 2. Development and Dogfood Failures
+
+Every meaningful failure discovered while developing or using Story should
+be considered a candidate regression fixture.
+
+Examples include:
+
+- misunderstood creative intent;
+- hallucinated scene properties;
+- missed scene opportunities;
+- generic direction;
+- unsafe direction;
+- physically infeasible direction;
+- instruction that is difficult to execute;
+- incorrect retry behavior;
+- redundant capture requests;
+- failure to stop when enough footage exists.
+
+The workflow is:
+
+real failure
+→ classify failure
+→ preserve the smallest reproducible case
+→ add regression fixture
+→ fix behavior
+→ run full evaluation suite
+→ keep fixture permanently
+
+When a failure is machine-checkable, also add or extend a deterministic
+check where appropriate.
+
+The regression dataset should therefore become increasingly representative
+of actual Story failure modes over time.
+
+---
+
+## 3. Real-User Evaluation Sessions
+
+After DIRECT is stable enough for internal dogfooding and beta testing,
+collect consented real-world evaluation sessions.
+
+The useful evaluation unit is the complete interaction trajectory, not only
+an isolated image or model response.
+
+Where privacy and consent allow, an evaluation session may contain:
+
+- user creative input;
+- CreativeIntent;
+- scene scan / SceneUnderstanding;
+- StoryConcept;
+- StoryBeats;
+- Director decisions;
+- shot instructions;
+- captured assets or privacy-safe derived representations;
+- ValidationResults;
+- Director-loop decisions;
+- final Story;
+- explicit user feedback.
+
+Useful user-feedback questions include:
+
+- Did Story suggest something worth shooting that you probably would not
+  have thought of yourself?
+- Was the direction easy to follow?
+- Did the direction match what you wanted?
+- Which recommendation was poor or confusing?
+- Do you prefer the resulting Story to what you would normally capture?
+
+Real-user data must follow the project's privacy, consent, retention, and
+media-handling policies.
+
+Do not assume production user media is automatically available for model
+evaluation or training.
+
+---
+
+# Dataset Collection by Milestone
+
+Dataset collection is part of each AI milestone rather than a separate
+future task.
+
+## Creative Intent milestone
+
+Before significant prompt tuning:
+
+- create approximately 30–50 curated Creative Intent fixtures;
+- cover simple, detailed, vague, ambiguous, constrained, and equivalent
+  phrasings;
+- include tone, pace, subject emphasis, negative constraints, and
+  underspecified requests.
+
+During implementation:
+
+- convert meaningful failures into regression fixtures.
+
+## Scene Understanding milestone
+
+Before significant model/prompt tuning:
+
+- collect approximately 20–30 representative real scene scans;
+- include indoor/outdoor, open/constrained, crowded/empty,
+  bright/low-light, landscape/social/urban environments;
+- include difficult and ambiguous scenes, not only visually attractive
+  examples.
+
+During real-device testing:
+
+- convert hallucinations, missed opportunities, and missed constraints into
+  regression fixtures.
+
+## Story Director milestone
+
+Construct controlled combinations of:
+
+- same intent × different scenes;
+- same scene × different intents;
+- selected Intent × Scene cross-matrix cases;
+- Director-loop outcomes.
+
+During dogfooding:
+
+- every meaningful Director failure becomes a candidate regression case.
+
+## Director Loop / End-to-End milestone
+
+Add complete trajectories covering:
+
+- successful capture;
+- failed capture requiring retry;
+- usable capture with partially fulfilled Beat;
+- new Shot for the same Beat;
+- scene rescan;
+- early create_now;
+- redundant-capture prevention.
+
+## Beta
+
+Begin collecting consented real-session cases and explicit user quality
+feedback.
+
+These cases should gradually become the most important source of new
+regression fixtures.
+
+---
+
+# Evaluation Capture in Debug Builds
+
+Once Story Director exists and internal dogfooding begins, add a lightweight
+debug-only mechanism for recording poor Director behavior.
+
+Conceptually:
+
+Director recommendation
+
+[Good direction]
+[Bad direction]
+
+For bad direction, allow classification such as:
+
+- generic;
+- does not use this scene;
+- does not match my intent;
+- difficult to shoot;
+- physically infeasible;
+- unsafe;
+- confusing;
+- other.
+
+The debug mechanism should preserve enough structured context to reproduce
+the behavior, subject to privacy constraints.
+
+It should make it easy to convert the captured case into an evaluation
+fixture.
+
+This debug tooling is NOT required before Creative Intent implementation.
+
+Implement it when Story Director becomes available for real-device
+dogfooding.
+
+---
+
+# Evaluation Dataset Rule
+
+No AI milestone is complete until meaningful new failures observed during
+that milestone have been:
+
+1. converted into regression fixtures; or
+2. explicitly documented as intentionally unsupported / deferred behavior.
+
+Evaluation data collection is therefore part of the Definition of Done for
+every AI milestone.
+
+The expected lifecycle is:
+
+DESIGN
+→ CURATED FIXTURES
+→ IMPLEMENT
+→ RUN EVALUATION
+→ REAL-DEVICE TEST
+→ DISCOVER FAILURES
+→ ADD REGRESSION FIXTURES
+→ FIX
+→ RUN FULL EVALUATION
+→ NEXT MILESTONE
+
+The evaluation dataset is a living product asset.
+
+It should become more valuable as Story encounters more real environments,
+creative intents, capture behaviors, and user failures.
+
+
 
 # 1. Purpose
 

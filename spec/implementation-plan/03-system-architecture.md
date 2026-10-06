@@ -822,6 +822,15 @@ persist locally
 
 ### AssetUnderstanding: eager and parallel
 
+> **SUPERSEDED for MVP (2026-10-05) — see `06-asset-understanding.md` (FROZEN).** The eager
+> server-side Bedrock fan-out described below is NOT the MVP AU model. MVP AU runs as an
+> **on-device persistent job queue**: each Moment enqueues a local AU job at add-time; the job
+> extracts 24 timestamped frames locally and posts a small (~1–3 MB) request to the existing App
+> Runner `/v1/asset-understanding` endpoint when execution/network conditions permit; the result
+> persists locally. Moment creation never blocks on AU. There is NO Create-My-Story server
+> fan-out, NO per-Moment eager cloud dispatch, NO SQS/worker/temp-S3. The two-phase text below is
+> retained only as historical context for the pre-experiment design.
+
 **Rule: AssetUnderstanding must never be computed serially at Create
 My Story time.**
 
