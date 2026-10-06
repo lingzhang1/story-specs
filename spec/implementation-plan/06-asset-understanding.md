@@ -353,3 +353,63 @@ For the MVP, Asset Understanding uses **an on-device persistent job queue + the 
 Runner inference endpoint**, with **no** temp-S3, presigned upload, SQS, Lambda/Fargate worker,
 or Bedrock async invocation. The general async-scaling guidance in those docs still applies to
 *other* future heavy jobs (generative media, rendering); it no longer describes AU.
+
+
+---
+
+## Scale / Bedrock throttling note (scale-time concern — NOT an MVP change)
+
+Added 2026-10-05 after device verification. This records the throttling behaviour and the scale
+path. **Nothing here changes the frozen MVP** — the MVP is already throttle-SAFE; these are the
+levers for when real user volume arrives.
+
+### Where the limit is
+Bedrock on-demand is throttled per account+model+region on **requests-per-minute (RPM)** and
+**tokens-per-minute (TPM)**. AU calls are **~21k input tokens each** (the 24 frames dominate; measured
+13.7k–21.6k in / 0.6–1k out on device), so **TPM is the binding limit, not RPM**. Example: a ~200k
+TPM quota allows only ~9 AU analyses/minute regardless of user count. A burst — e.g. 100 users each
+finishing a trip and importing/capturing ~10 Moments at once — far exceeds that and WILL throttle.
+
+### What the MVP already does under throttling (safe by design)
+A Bedrock throttle surfaces as `ProviderError` → the engine's one retry (§5) → if still throttled,
+`AURetryableError` → the endpoint returns **503** → the on-device queue leaves the job **PENDING with
+bounded exponential backoff** (5s→20s→80s… cap 10 min) and retries on a later eligibility (§6). So
+throttling means **"understanding lands later," never a user-facing failure or data loss** — exactly
+the async property the design targets. Moment creation is never affected.
+
+### Gaps at scale (not failures — capacity/efficiency)
+1. **No server-side flow control** — every device calls Bedrock directly; under a burst, devices back
+   off independently (uncoordinated thundering-herd retries) and effective throughput is still capped
+   at TPM. Backoff prevents failure but creates no capacity.
+2. **The one retry can burn both attempts** during a genuine spike before the device backoff kicks in.
+3. **No concurrency cap** on the server — N devices = N concurrent Bedrock calls, bounded by nothing
+   the service controls.
+
+### Scale path (in order of leverage; build only when measured load requires it)
+1. **Request a Bedrock TPM/RPM quota increase** (Service Quotas → Bedrock → Sonnet 4.6). Cheapest first
+   move; usually enough for early cohorts. Do this when onboarding the first real users.
+2. **Server-side token-bucket / concurrency gate** in the App Runner service in front of the
+   ModelGateway: cap concurrent Bedrock calls to stay under TPM; return **503 (retryable)** when the
+   bucket is empty. The device queue ALREADY handles 503 correctly, so this turns chaotic per-device
+   backoff into coordinated flow control. **Highest-value change, fits the existing design, no new
+   infra.** This is the recommended first real scale step.
+3. **Provisioned Throughput** for Bedrock if volume becomes steady and high (reserved TPM, predictable,
+   billed hourly whether used or not — only at real scale).
+4. **The deferred SQS→worker architecture** (03/04) — a true server-side queue with centralized rate
+   control + retries off the device. The frozen design left this as the escalation path precisely for
+   this situation; the device queue is the MVP, the SQS worker is the scale answer. Do NOT reach for it
+   until the in-service gate (#2) is proven insufficient.
+5. **Cross-region inference profile** — the `us.` profile already load-balances across regions, raising
+   effective throughput somewhat for free.
+
+### Cost scales linearly and invisibly (separate from throttling)
+At ~**$0.078/analyzed Moment** (measured, Sonnet 4.6 @ 24 frames, us-east-1 on-demand ESTIMATE
+2026-10-05): 1,000 users × ~30 analyzed Moments ≈ **~$2,300/month in AU alone**. Throttling protects
+*availability*; it does nothing for *spend*. If spend matters at scale, the frame count (24) and the
+model are the levers — both already measured in the finalist/density experiments.
+
+### Recommendation
+- **Dogfood / early users:** do nothing — the device queue + backoff makes throttling a non-event.
+  Request a TPM quota increase (#1) when the first real cohort onboards.
+- **First real scale step:** add the server-side concurrency/token-bucket gate (#2). Do NOT build
+  SQS/workers until measured load proves the in-service gate insufficient.
