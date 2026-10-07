@@ -135,3 +135,67 @@ audio handled correctly (B/D recede), no fake cut precision, no Moment/clip leak
 decision evidenced (KEEP)**, **key_moments decision evidenced (DROP)**, contract minimized. The only open
 input is the model pick (§13), reserved for the owner given the close margin. On your pick I freeze the
 MusicPlan contract + prompt + model and STOP.
+
+
+---
+
+## 18. OWNER DECISION — M-b FROZEN & CLOSED (2026-10-07)
+
+Everything above §18 is the experiment as run; it is preserved UNCHANGED. This section records the owner's
+freeze decision and where the frozen artifacts live.
+
+**Model (frozen):** `us.anthropic.claude-opus-4-6-v1`. Task-specific selection — chosen for slightly better
+soundtrack *restraint* and native-audio payoff behavior (the guitar Arm-B arc ending on `intensity: falling`
+so the real performance takes over), and for consistency with the Opus-backed Coverage/Guide stack. Sonnet
+4.6 remains a valid future cost-optimized alternative (~5× cheaper, equally gate-clean). **No additional
+model comparison or prompt tuning is authorized.**
+
+**Frozen prompt:** `music_plan/1` — `prompts/music_plan/v1/system.md` (app repo). Frozen VERBATIM from the
+validated experiment SYSTEM (`music_plan/exp-v1` in `evals/music_plan/run_experiment.py`); decoding
+temperature 0, structured tool-use, 2 repair attempts. The body still *mentions* `key_moments` (as the
+validated text did) but the frozen CONTRACT no longer exposes that field, so it cannot be emitted — the
+contract is the enforcement point. Prompt text left unchanged to freeze exact validated behavior.
+
+**Frozen contract:** `music_plan/1` — Pydantic `MusicPlanContract` in `contracts/schemas/ai_contracts.py`;
+canonical JSON Schema generated to `contracts/schemas/music-plan.schema.json` via `contracts/generate_schema.py`
+(registered in `AI_CONTRACTS`). A sync test (`test_music_plan_schema_dropped_key_moments_and_in_sync`) guards
+against schema/model drift.
+
+**Kept fields (each has a downstream consumer):**
+- `schema_version`, `story_id`, `target_duration_seconds`, `provenance` — envelope / server-minted.
+- `character { mood_tags[], energy }` — resolved MusicDirection snapshot (provenance + seeds track selection).
+- `energy_arc[] { label, start_fraction, end_fraction, intensity(low|rising|high|falling), note? }` —
+  scope-sensitive, approximate normalized regions, categorical intensity.
+- `audio_strategy { soundtrack_role(continuous|supportive|sparse), native_audio_priority(low|selective|important), guidance? }`
+  — first-class native audio.
+- `track_selection_criteria? { mood_tags[], energy, structure_hint }` — optional handoff to the future track
+  selector (M-d). Kept per §16.3: zero cost, natural seam.
+
+**Dropped:** `key_moments[]` (ablated — redundant with `energy_arc` + `audio_strategy`). Also never present:
+numeric energy scores, absolute seconds / cut points, Moment/clip ids, transitions, per-shot instructions,
+one-section-per-Guide-dimension.
+
+**Coverage/2 input — KEPT.** Ablation-evidenced: Arm B meaningfully improved plans (TMB → grit/resolve matching
+the storm Coverage; guitar supportive→sparse once the real song take is known). Production MusicPlan consumes
+`CreativeIntent + MusicDirection + StoryGuide + StoryCoverage/2 + target_duration`.
+
+**MusicDirection ownership.** MusicDirection stays AUTHORITATIVE for mood/energy/progression and user musical
+preferences. MusicPlan.character is a RESOLVED snapshot carried for provenance only — no competing source of
+truth.
+
+**Timing/recompute (unchanged).** Generated at / immediately before Create My Story. NOT recomputed
+continuously during capture.
+
+**Track sourcing — DEFERRED to M-d.** No provider, no catalog, no licensing assumption, no audio
+infrastructure. `track_selection_criteria` is the only forward seam and selects nothing.
+
+**Verification.** 149 contract + backend tests pass (incl. 8 new MusicPlan tests: round-trip, categorical
+intensity, normalized fractions, optional track-selection, native-audio vocabularies, absence of key_moments,
+no Moment/cut leakage, schema-sync). This freezes the CONTRACT; model-output quality was NOT re-verified
+(no live inference rerun) — the §4–10 experiment results stand as the quality evidence.
+
+**Deferred follow-up (NOT this task):** the Swift `MusicPlanDTO` in `apps/ios/.../Data/Contracts/StoryContracts.swift`
+is consumer-side and belongs to M-c / Edit Planner wiring, so it is intentionally not added here.
+
+**STATUS: M-b CLOSED.** M-c (MusicDirection infer + Figma MUSIC line), M-d (track sourcing), and the Edit
+Planner have NOT started.
