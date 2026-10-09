@@ -121,3 +121,57 @@ needs the R-a Edit Evidence experiment) remain SEPARATE, NOT started.
 match cuts · motion continuity · speed ramps · sound bridges · color matching · layered compositions ·
 split screens · masking → all require the separate Edit Evidence experiment (R-a design). AU/Edit-Planner
 contracts NOT reopened.
+
+---
+
+# R-b.1 — Crossfade IMPLEMENTED (2026-10-08). Device verification pending. App commit 7ec3762.
+
+Owner authorized building the 0.3s crossfade. Done as a real engine change (NOT fake). Parse-clean; the actual
+render is the device gate — swiftc -parse is NOT a render claim.
+
+## Transition semantics (DECISION — no contract change)
+Frozen `TransitionType = {cut, fade, dissolve}` (ai_contracts.py, UNCHANGED). The renderer maps:
+- **`dissolve` = crossfade** (both clips visible, cross-dissolving opacity) — the standard meaning, and what
+  Case D wants. `duration_seconds` defaults to **0.3** when omitted.
+- **`fade`** = a single-clip fade (NOT a crossfade) — `crossfadeSeconds = 0`, so `fade` is never rendered as a
+  fade-to-black-as-crossfade (the forbidden simulation).
+- **`cut`** = straight cut (zero overlap).
+This is an interpretation in the RENDERER only; the frozen contract is untouched. Not ambiguous enough to STOP:
+`dissolve` is the unambiguous cross-dissolve type.
+
+## Implementation (`MediaEngineV1.buildComposition`)
+- **Two video tracks (ping-pong):** segment i on track i%2, so adjacent segments can OVERLAP. A cut is just a
+  zero-overlap placement — the two-track arrangement is a superset of the old single-track cut path.
+- **Overlap:** a `dissolve` on segment i pulls its start back by the clamped crossfade (< min(neighbour
+  durations) − 0.05 so the timeline can never invert).
+- **Opacity ramps:** per-time-range `AVVideoCompositionInstruction`s — solo ranges show one track; the overlap
+  range shows both with outgoing opacity 1→0 and incoming 0→1 (incoming drawn over outgoing). No black frames
+  (both layers are opaque footage through the blend), no fade-to-black.
+- **Orientation/crop preserved through the transition:** each track's aspect-fill transform is set on BOTH the
+  solo and overlap instructions.
+- **Output duration:** total = Σ outputDuration − Σ overlaps (one 0.3s per dissolve) — the fixture asserts it.
+- **Audio:** two capture tracks (A/B) matching the video ping-pong; each segment ramps in/out over its own
+  range with the 0.08s click-guard, and the outgoing ramp-out coincides with the incoming ramp-in across the
+  overlap, so the mix never spikes. keep/duck/mute preserved. No model curves.
+
+## Fixtures + picker (DEBUG only, not in Release)
+`DebugEditPlanFixture`: `montage` (cut) · `crossfade` (0.3s dissolve) · `speedCases` (0.5x/2x) · `missingMoment`
+(unresolvable id). Harness `FixtureCase` picker selects all four; real-plan toggle unchanged.
+
+## Tests (VERIFIED HERE — deterministic, no media)
+transition decode; dissolve→0.3 / fade→0 crossfade mapping; crossfade fixture overlap + duration arithmetic;
+speed→duration consistency; missing-Moment fixture unresolvable-first-segment; plus the pre-existing 8. REQUIRES
+XCODE/DEVICE: the XCTest RUN + the actual crossfade RENDER (opacity blend, no black frames, audio continuity).
+
+## Updated device acceptance checklist (B / D / F)
+Rebuild in Xcode (new/changed files in target). Create preview → DEBUG → Render Test (dev).
+- **B — native audio:** real-plan render → play → guitar audible, keep preserved, in sync, no discontinuity.
+- **D — crossfade:** fixture → "Crossfade 0.3s (D)" → play → a REAL 0.3s cross-dissolve between clips, NO black
+  frames, no stretch, audio continuous across the blend.
+- **D — speed:** fixture → "Speed 0.5x/2x (D)" → play → seg1 slow, seg2 fast, audio synced, no black frames.
+- **F — missing Moment:** fixture → "Missing Moment (F)" → clear "missingMoment" error, NO output, Moments intact.
+
+## Closure
+R-b.1 code complete + parse-clean + tested. **R-b remains PENDING DEVICE ACCEPTANCE** (B/D/F runs). I did NOT
+mark R-b CLOSED — owner runs the checklist above; if all pass, R-b closes and R-c implementation is the next
+milestone (design already written above — no re-reconciliation needed).
