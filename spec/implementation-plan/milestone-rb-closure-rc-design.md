@@ -171,7 +171,33 @@ Rebuild in Xcode (new/changed files in target). Create preview → DEBUG → Ren
 - **D — speed:** fixture → "Speed 0.5x/2x (D)" → play → seg1 slow, seg2 fast, audio synced, no black frames.
 - **F — missing Moment:** fixture → "Missing Moment (F)" → clear "missingMoment" error, NO output, Moments intact.
 
+## R-b.1 fix — exportFailed("Operation Stopped") on crossfade (app 7bb5755)
+First device run of the crossfade fixture failed at export with `exportFailed("Operation Stopped")` and no
+output file (diagnostics: planned 8.4s / 3 segments / dissolve, output size "—"). ROOT CAUSE: an invalid
+`AVVideoComposition` timeline. `instructions` MUST tile `[0, total]` contiguously with NO gaps and NO overlapping
+time ranges; the first implementation built instructions per-segment and DOUBLE-COVERED the crossfade window
+(segment i's overlap instruction and segment i+1's solo instruction both began at the same boundary), which
+AVAssetExportSession rejects outright. FIX: rebuild instructions by a BOUNDARY SWEEP — collect every segment
+start+end, sort/dedupe, emit exactly one instruction per `[t_k, t_{k+1})` slice; a slice with 1 live segment is
+solo (full opacity), 2 live segments is the crossfade (outgoing 1→0, incoming 0→1, drawn on top). Contiguous
+non-overlapping coverage by construction. Added an arithmetic regression test locking the solo|crossfade|solo
+|crossfade|solo tiling for the 3×3s/0.3s case.
+
+## DEVICE ACCEPTANCE — RESULTS (2026-10-08, physical iPhone)
+Owner rebuilt and rendered all three fixtures; all exported real MP4s (probed off-device):
+- **Crossfade (D): PASS** — 8.40s (= 3×3.0 − 2×0.3), 720×1280 @30fps, 1 audio track. Frame inspection at both
+  overlap midpoints (2.85s, 5.55s) shows a REAL cross-dissolve — two guitar clips blended at ~50% opacity, no
+  black frame, upright/no stretch. The "Operation Stopped" failure is gone.
+- **Speed (D): PASS** — 7.00s (0.5x→4s + 2.0x→1s + 1.0x→2s), 720×1280 @30fps, 1 audio track. Speed scaling
+  demonstrably applied (would be 6s unscaled).
+- **Montage (A): PASS** — 12.00s, 720×1280 @30fps, 1 audio track.
+
 ## Closure
-R-b.1 code complete + parse-clean + tested. **R-b remains PENDING DEVICE ACCEPTANCE** (B/D/F runs). I did NOT
-mark R-b CLOSED — owner runs the checklist above; if all pass, R-b closes and R-c implementation is the next
-milestone (design already written above — no re-reconciliation needed).
+**Case D (crossfade + speed) and Case A: CLOSED on device.** R-b REMAINS PENDING on the two gates that need the
+owner's direct observation and cannot be verified off-device:
+- **B — native audio:** audible guitar + sync is a listening check only (track present; gain path verified).
+- **F — missing Moment:** owner runs the "Missing Moment (F)" fixture → confirm clear error, no output, Moments
+  intact (engine throws `missingMoment` pre-export by construction, but the on-device UX is the gate).
+
+When B and F are confirmed, R-b is CLOSED and R-c implementation is the next milestone (design already written
+above — no re-reconciliation needed).
