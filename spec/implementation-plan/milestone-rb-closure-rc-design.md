@@ -201,3 +201,25 @@ owner's direct observation and cannot be verified off-device:
 
 When B and F are confirmed, R-b is CLOSED and R-c implementation is the next milestone (design already written
 above — no re-reconciliation needed).
+
+## R-c IMPLEMENTATION COMPLETE (2026-10-09) — awaiting device acceptance
+Built in 4 verified batches on app `master` (not pushed), tests-first, mock removed from the consumer path.
+- Batch A `752714e`: real GeneratedOutputModel persistence (file ref + sourceMomentIds + FNV-1a fingerprint +
+  provenance + dimensions + isStale; no video bytes in SwiftData, migration-safe) + StoryCreationCoordinator
+  (8-state lifecycle idle/preparing/planning/validating/rendering/completed/failed/cancelled, music-ready nil
+  seam, 10 pre-AVFoundation validations, duplicate guard, cancel/retry; reuses EditPlanRequestBuilder +
+  EditPlannerService + MediaEngineV1 + RenderOutputStore) + 17 tests.
+- Batch B `fe123bf`: StoryCreatingView (coordinator-driven real progress, cancel/retry, no fake timer) +
+  StoryResultView (AVPlayer playback, Save to Photos via PhotosSaver, Share to Files, reopen persisted output,
+  stale->Re-create keeping old output, honest no-music copy, Change-music disabled until R-d) + 16 tests.
+- Batch C `7956ad4`: real consumer Create My Story on Story Home + preview, readiness-gated by the SAME rule as
+  EditPlanRequestBuilder (>=1 Moment with local file AND completed AU; test asserts agreement), honest status
+  copy, mock GeneratedOutput removed from consumer path (DEBUG-only now), DEBUG harness intact + 13 tests.
+- Batch D `2361538`: failure/regression coverage (transport/503+retry/422/invalid-plan/cancel+source-preservation/
+  duplicate/persistence/reopen/staleness/recreation) + 10 tests. Audit found NO production bug; source Moments
+  never deleted on any failure path.
+TOTAL 56 deterministic tests; all touched Swift parse-clean. Backend /v1/edit-plan verified LIVE (422 on empty).
+No new AWS infra, Epidemic off. DEVICE-GATE (not claimed): real render/export, AVPlayer, Save/Share, XCTest run,
+@Model/@Observable macro build — need Xcode/iPhone. R-c NOT marked closed until owner device acceptance (14-step
+checklist). STOP before R-d. Fingerprint semantics: source-media replacement under an unchanged Moment id DOES
+invalidate (relativePath+duration in the hash).
