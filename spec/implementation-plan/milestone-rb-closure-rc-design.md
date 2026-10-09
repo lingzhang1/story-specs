@@ -223,3 +223,62 @@ No new AWS infra, Epidemic off. DEVICE-GATE (not claimed): real render/export, A
 @Model/@Observable macro build — need Xcode/iPhone. R-c NOT marked closed until owner device acceptance (14-step
 checklist). STOP before R-d. Fingerprint semantics: source-media replacement under an unchanged Moment id DOES
 invalidate (relativePath+duration in the hash).
+
+---
+
+## R-c BLOCKER FIX — Edit Planner executability repair (2026-10-09, device-reproduced, deployed)
+
+ROOT CAUSE (confirmed from App Runner logs + deterministic repro). The R-c app flow worked end-to-end on device
+(Home enable, Create, Creating lifecycle, honest 503 failure + Try again, no fake montage, Moments preserved),
+but PLANNING failed: the real Opus call returned schema-valid but NON-EXECUTABLE plans that the deterministic
+validator correctly refused (503, never fabricate). Two real device failures (corr ids in logs):
+  (1) `total output 15.0s is >20% off target 12s` — segment outputs summed past the ±20% tolerance;
+  (2) `seg3: output 2.5s inconsistent with source span 7.5s @ speed 1.0 (expected ~7.5s)` — output ≠ span/speed.
+There was NO executability-repair feedback: a non-executable plan went straight to StructuredOutputError→503, so
+Opus never saw its own arithmetic error. SEPARATE latent bug: dict-shaped `useful_segments` hit `u[0]`→KeyError→
+unhandled 500 (the device sends `[[a,b]]` pairs and never hit it; a malformed/legacy shape would).
+
+FIX (owner-approved C+D; commit story 5be33ba). NO EditPlan/2 contract change, NO model comparison.
+- SHARED TIMELINE ARITHMETIC: one source of truth (`SegmentTimeline`, `timeline_total_seconds`,
+  `_useful_ranges`) used by BOTH the validator and the repair/normalize layer, so they cannot disagree. The
+  total accounts for crossfade overlap (a crossfade overlaps two clips, shortening wall-clock).
+- PROMPT edit_plan/3 (prompts/edit_plan/3/system.md). v2 body VERBATIM + ONE added section "EXECUTABILITY
+  INVARIANTS (MECHANICAL)" stating the pre-existing validator rules in the model's terms: valid source range;
+  output = (source_end−source_start)/speed; total within ±20% of target; transitions accounted for; Story target
+  beats track length; honest infeasibility (feasible=false, never invent footage). NO change to creative
+  selection / narrative / native-audio / music-alignment. edit_plan/2 PRESERVED on disk for reproducibility
+  (switch _PROMPT_PATH back to "2" to reproduce pre-R-c behavior). Contract schema_version stays edit_plan/2.
+- SAFE DETERMINISTIC NORMALIZATION (`normalize_plan`): the ONLY auto-correction is snapping a segment's redundant
+  output_duration to the exact span/speed when already within 0.15s (a rounding artefact). NEVER truncates a
+  source range, changes speed, drops/reorders a segment, or alters emphasis. A 7.5s-span-vs-2.5s mismatch is NOT
+  snappable → goes to model repair.
+- EXECUTABILITY-REPAIR LOOP (`RealEditPlannerEngine`, MVP bounded): generate → normalize → validate → if invalid,
+  ONE additional model turn carrying the EXACT validator errors + the model's own bad plan, asking it to fix only
+  those while preserving narrative intent → normalize → revalidate → else honest fail. Deterministic validator
+  ALWAYS authoritative; model never self-certifies. No nested/duplicate loops (model_calls ≤ 2).
+- ERROR SEMANTICS: MalformedPlanError → 422 ("input malformed", no 500); infeasible → 422; model-invalid-after-
+  repair → 503 "could not be made executable; retry" (distinct detail from provider outage → 503 "temporarily
+  unavailable"). iOS already maps 503→retryable, 422→infeasible/needs-material.
+
+TESTS: 28 edit-planner tests (both device failures reproduced deterministically; safe-rounding; large-mismatch
+NOT normalized; repair success; repair-still-invalid → structured fail; bounded no-dup-loop; no invented ids;
+crossfade duration accounting; native-audio + music-alignment unchanged; malformed→422; dict-shape tolerated;
+503 distinct). Full backend suite 135 passed, contracts 60 passed, eval validator self-test 8/8.
+
+RELIABILITY (live Opus us.anthropic.claude-opus-4-6-v1, 5 frozen scenarios + 1 adversarial 6s-target guitar,
+NO-MUSIC): first-pass executable 6/6; 4 clean, 1 safe-normalized, 1 honest-infeasible (30s material vs 60s
+target); 0 model repairs needed, 0 final failures. ~27k tokens total, avg 9.7s/call, ≈$0.68. The v3 invariants
+ELIMINATED the arithmetic-failure class on first pass; the repair loop is the backstop (its live path was not
+triggered because first-pass kept succeeding — repair-loop correctness is proven by the deterministic SeqGateway
+tests, not claimed from a live retry).
+
+DEPLOY (existing authorized env only). Built via CodeBuild story-rb-caseg-build (S3-zip source → ECR
+story-development-api:latest, buildspec fixed to the project's ECR_URI env) → App Runner start-deployment →
+RUNNING. Verified: /health 200; malformed useful_segments → 422 (was 500); real Guitar-Practice-shape request →
+200 executable (3 segments, each out=span/speed, total 12.0s=target); success log carries repair diagnostics
+(first_pass/normalized/repaired/model_calls), no secrets/private media. No new infra, Epidemic off.
+
+STATUS: backend fix COMPLETE + deployed + verified server-side. R-c still at the PHYSICAL-DEVICE gate — owner must
+repeat Create on the Guitar Practice Story and confirm planning now succeeds (or fails honestly), real render,
+Moments intact, retry, no fake footage/soundtrack. R-c NOT closed until that. STOP before R-d.
+
