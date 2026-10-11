@@ -112,6 +112,7 @@ build scope: `spec/implementation-plan/mvp-build-plan.md`; frozen contracts:
 | **Edit Planner max_tokens truncation fix (24-Moment 503)** | [edit-planner-maxtokens-truncation-fix](./milestone-edit-planner-maxtokens-truncation-fix.md) | — |
 | **Native-audio disappearance audit (guitar performance)** | [native-audio-disappearance-audit](./milestone-native-audio-disappearance-audit.md) | — (fix proposed, owner gate) |
 | **Next-page recommendations (music picker)** | [rd7-music-next-page-recommendations](./milestone-rd7-music-next-page-recommendations.md) | — |
+| **Native-audio restoration (TMB+guitar) + V2-b immersive scope** | [native-audio-restoration-tmb](./milestone-native-audio-restoration-tmb.md) | — (device listening + V2-b gate) |
 | Edit Planner M-d.3 (MusicAnalysis A/B) | md3-api-validation-edit-planner-experiment | edit_planner_md3.json |
 | **Editorial Timing A/B (edit_plan/3 vs 4)** | rd1-editorial-timing… | edit_planner_editorial_timing_ab{,_v2}.json |
 | **Guitar AU audit** | rd1-editorial-timing… | au_guitar_practice_001_audit.json |
