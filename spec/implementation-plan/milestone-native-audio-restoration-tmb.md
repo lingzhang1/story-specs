@@ -79,4 +79,45 @@ just during a spoken line): that needs a per-segment `soundtrack_gain_envelope` 
 for approval. NOT in scope now. NOT building audio separation. NOT building the whole V2-b milestone.
 
 ## STOP
-Minimum fix implemented (iOS wiring). Device listening acceptance + V2-b immersive scope await owner. Not pushed.
+
+## 8. DEVICE-CONFIRMED ROOT CAUSE (supersedes the earlier inference) — 2026-10-11 13:24
+On-device DEBUG readout from a regenerated TMB render (now shown on the completed screen):
+`native_audio[duck×12 keep×7 mute×6] role=continuous priority=selective` (25 segments).
+Gain table consequence: duck→native 0.25 under soundtrack 1.0 (role=continuous); mute→native 0.0; keep→native
+1.0 under soundtrack 0.2. So **18 of 25 segments (72%) have native audio ducked-under-full-music or muted** —
+that is why TMB plays music-only. This is NOT the MusicPlan priority I chased earlier (the Guide/ensureGuide
+fixes correctly moved priority off `low` to `selective`); it is the **Edit Planner's per-segment native_audio
+decision**.
+
+Earlier "device sent an empty StoryGuide" was an INFERENCE and is withdrawn — the backend does not log guide
+presence, so it was never evidence. The histogram above is the actual evidence.
+
+### Primary fault — frozen Edit Planner v4 prompt has no concept of meaningful ENVIRONMENTAL sound
+`prompts/edit_plan/4/system.md` native-audio clause ends:
+> "If a Moment's own sound is the emotional payoff (a real guitar performance, birthday singing, meaningful
+> dialogue), native_audio=keep. Otherwise duck or mute."
+A hiking Story has no "performance" and no "dialogue" by that list, so the model dumps wind/footsteps/water/
+ambient-conversation to duck/mute. Guitar works precisely because it matches "a real guitar performance" → keep.
+
+### PROPOSED versioned amendment — edit_plan/5 (NOT applied; frozen prompt, owner gate)
+Clone prompts/edit_plan/4 → prompts/edit_plan/5, change ONLY the native-audio clause's last two sentences to
+add meaningful environmental sound as a keep trigger, e.g.:
+> "native_audio=keep when the Moment's own sound carries meaning — a performance, singing, intelligible
+> conversation, OR meaningful environmental/ambient sound the Story is partly about (wind, footsteps, water,
+> a crowd, laughter). Use duck when the captured sound is minor but should still be present under the music;
+> use mute only when the captured sound is noise or empty. When MusicPlan.native_audio_priority is important or
+> selective, bias toward keep for ambience-driven Stories."
+Nothing else in the prompt changes. Bump the handler/version pin to edit_plan/5 behind the existing env knob so
+it is A/B-testable against v4. Contract (segments carry keep/duck/mute) is UNCHANGED — no schema change.
+
+### Secondary candidate (do NOT change without owner go — owner forbade reinterpreting duck/role globally)
+Renderer `soundtrackGainUnder`: under a `duck` segment with role=continuous the soundtrack stays at 1.0 while
+native is 0.25 — so "duck" buries the native rather than lowering the music. This may be intended, but it means
+`duck` can never yield audible ambience. NOT proposing a change; flagging it. If the prompt fix alone (more
+`keep`) restores TMB audio on device, this needs no touch.
+
+## STOP (updated)
+Root cause CONFIRMED on device: Edit Planner marks meaningful ambience duck/mute (18/25). Smallest responsible
+layer = the Edit Planner prompt, which is FROZEN → versioned edit_plan/5 amendment PROPOSED above, awaiting owner
+approval before any prompt file is created. iOS wiring fixes (guide pass-through + ensureGuide) remain correct
+and committed. Diagnostics (completed-screen readout + native_audio histogram) added, not yet committed. Not pushed.
