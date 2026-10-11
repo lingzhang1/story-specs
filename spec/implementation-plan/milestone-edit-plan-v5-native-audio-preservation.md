@@ -149,6 +149,26 @@ layer is the MusicPlan INPUT (StoryGuide evidence) + role, not another edit_plan
 more prompt edits. Next: verify the iOS guide-passing fix is actually in the device build and that
 ensureGuide runs on this render path; separately decide role=continuous handling.
 
+## STAGE 1d — CLEAN-REBUILD device verification (resolved) — 2026-10-11 15:12
+Clean Xcode rebuild + reinstall, re-rendered the existing TMB Story. On-screen + backend CORRELATED:
+- `🧪 build b6c0237-guidewire+ensure` → installed binary now HAS the guide fixes (a4c6aa5+4391b42). The prior
+  low result WAS a stale build — hypothesis confirmed.
+- `🧭 build=b6c0237 ensureGuide=ok guide=yes(4dims) coverage=yes -> role=continuous priority=selective` → the
+  SINGLE MusicPlan path now carries a real StoryGuide (4 dimensions) + Coverage. Input path works.
+- Backend: MUSICPLAN priority=selective role=continuous; EDITPLAN prompt_version=edit_plan/5 segs=21.
+- Plan FLIPPED: before (stale build) duck×17 keep×3 mute×9 (26/29 buried); NOW **duck×6 keep×15 mute×0**
+  (15/21 keep, ZERO mute). v5 + real guide preserves native audio on the majority of the timeline.
+
+Decision gate → branch 3: priority corrected (low→selective), native largely kept. Remaining item is the
+owner-flagged renderer quirk ONLY: role=continuous. Under role=continuous the gain table gives keep segments
+soundtrack 0.2 (native leads — good) but duck segments soundtrack 1.0 / native 0.25. With keep×15 the wind/
+footsteps/conversation SHOULD now be clearly audible on most of the video — a LISTENING check decides whether
+anything more is needed. NO renderer change made (owner: do not change renderer gains yet).
+
+Root cause of the whole TMB saga (final): a STALE device build that predated the StoryGuide input-wiring fixes,
+so MusicPlan was starved of the Guide and returned low → v5 (and v4) correctly duck/muted. Not a v5 fault, not
+a prompt fault. Fixed by the committed iOS wiring once actually installed.
+
 ## STOP — v5 FREEZE GATE
 Stage 1 complete and passing. Per Part D, STOP here for owner freeze approval before stages 3–7 and before any
 production integration. On approval: freeze edit_plan/5 (flip the default or deploy with the env set) and
