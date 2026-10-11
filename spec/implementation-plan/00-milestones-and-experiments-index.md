@@ -107,6 +107,7 @@ build scope: `spec/implementation-plan/mvp-build-plan.md`; frozen contracts:
 | **Epidemic MCP provider + energy_curve + adaptation** | [md5-epidemic-mcp-provider](./milestone-md5-epidemic-mcp-provider.md) | adapt review set (scratch, not committed) |
 | **Track adaptation final quality gate (durations + A/B/C)** | [md5b-track-adaptation-quality-gate](./milestone-md5b-track-adaptation-quality-gate.md) | adapt review set (scratch) |
 | **Music search + pagination (picker) · render-test removal** | [rd6-music-search-pagination](./milestone-rd6-music-search-pagination.md) | — |
+| **Creative Editing V2-a Phase 0 (design/feasibility)** | [v2a-creative-editing-phase0](./milestone-v2a-creative-editing-phase0.md) | — |
 | Edit Planner M-d.3 (MusicAnalysis A/B) | md3-api-validation-edit-planner-experiment | edit_planner_md3.json |
 | **Editorial Timing A/B (edit_plan/3 vs 4)** | rd1-editorial-timing… | edit_planner_editorial_timing_ab{,_v2}.json |
 | **Guitar AU audit** | rd1-editorial-timing… | au_guitar_practice_001_audit.json |
