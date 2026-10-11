@@ -81,13 +81,17 @@ increase; each field has a named consumer + benefit. This is a **proposal**, not
   here is primarily about *protecting the frozen narrative planner*, which is a reliability win regardless.
 
 ## 6. Real-footage quality experiment design
-- **Footage on disk:** `evals/scenarios/guitar_practice_001/` has 5 real clips **and an APPROVED human
-  editorial reference** (`editorial_reference.APPROVED.json`) → ideal for the A/B/**C** comparison. TMB exists
-  as reference-pointers (moments/scenes) — usable for A/B, C only if a human ref is added. **San Francisco
-  footage is NOT present** as scenario assets — state explicitly; experiment runs on guitar (full A/B/C) + TMB
-  (A/B) until SF footage is provided.
+- **Footage on disk:** `evals/scenarios/guitar_practice_001/` has **6 real clips** (string_first_touch,
+  guitar_overview, first_practicing_a_song, first_song_but_not_familar, familar_with_song, final_song).
+  **CORRECTION (V2-b Phase 0):** an earlier draft of this doc said "5" — it is **6**; the AU audit covers all 6.
+- **The `editorial_reference.APPROVED.json` is a human-APPROVED NARRATIVE ANNOTATION, not a rendered human
+  edit.** Its own provenance states `annotations_in_dir: "none"` and its durations are explicitly "editorial
+  CANDIDATES, not model instructions or scoring thresholds" — there is NO cut-timing EDL and NO rendered video.
+  So it is a narrative-expectation checklist, NOT a Phase-5 "C" baseline. **There is no genuine human-edited
+  reference** for guitar; the experiment is **A/B only**, with this annotation used to sanity-check narrative
+  coverage. TMB is reference-pointers (A/B only). **San Francisco footage is NOT present** (deferred per owner).
 - **Conditions, same source + CreativeIntent:** A = current V1 edit; B = evidence-informed V2 (deterministic
-  refinement per §5-B); C = human-edited reference (guitar APPROVED).
+  refinement per §5-B). **C (rendered human reference) does not exist** — not fabricated.
 - **Score (blind where possible):** narrative coherence · pacing · cut quality · visual continuity ·
   native-audio continuity · emotional effect · artifacts · viewer preference. **A clean straight cut wins if it
   wins** — effects earn nothing for merely existing.
