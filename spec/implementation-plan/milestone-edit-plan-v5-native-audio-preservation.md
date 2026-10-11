@@ -64,6 +64,67 @@ edit_plan/5: prompt-only, additive, env-gated — EditPlan/2 schema UNCHANGED. S
 carry inside CreativeIntent (no frozen change); only if impossible, a minimal additive request field. No frozen
 EditPlan/2 or music_plan/1 semantic change. mute is never globally turned into duck.
 
+## STAGE 1b — Real-TMB confirmation A/B (owner freeze condition) — 2026-10-11
+
+### 1. Exact evidence used (Phase 1)
+Source: `evals/story_coverage/real_moment_understanding.json` — REAL asset-understanding (MomentUnderstanding)
+output for the TMB hiking domain: 15 narrative scenes (backpack, departure, scenic reveal, trail, human-scale,
+river crossing, companionship/conversation 95s, end-of-day). Summaries + useful_segments used VERBATIM; NOT
+enriched. Intent/MusicPlan set to an immersive hike (role=supportive, priority=important), guide/coverage {}.
+LIMITATION (explicit): this is the closest available representation, NOT the exact failed device request. The
+device's own CreativeIntent/Guide/Coverage/MomentUnderstanding for the specific TMB render that produced
+duck×12/mute×6 live only on the phone and could not be recovered here. Consequently v4 on THESE records already
+scores 76% keep — i.e. these records do NOT reproduce the device music-only failure. See Remaining risks.
+
+KEY FINDING (Phase 3 root signal): **13 of 15 real TMB moment summaries contain NO audio description at all** —
+including the 95s "natural conversation" scene and the 38s river crossing. MomentUnderstanding describes what is
+SEEN, not HEARD. So the planner decides native_audio with essentially no audio evidence.
+
+### 2–3. v4 vs v5, timeline-WEIGHTED (not counts) — real thin TMB inputs
+| | v4 | v5 |
+|---|---|---|
+| TMB real moments | keep 76% / duck 24% / mute 0% (12 segs, 72.5s) | **keep 100%** (11 segs, 74.2s) |
+Both feasible/executable. v5 lifts the remaining ducked ambience (incl. the no-audio-description trail/pack
+shots) to keep; v4 ducked 24% of the timeline for lack of a stated reason.
+
+### Missing-audio-evidence test (Phase 3) — mixed clip set
+v5 on [cliff: no audio desc | waves: meaningful natural | wind-roar: unusable | silent beach]:
+`duck 10s (cliff, no desc) · keep 14s+14s (waves) · mute 5s (wind-roar overload)`.
+→ Missing description did NOT auto-duck/mute (cliff ducked but present, not muted); meaningful natural sound
+KEPT; explicitly-unusable audio MUTED for a stated reason. v4 blindly kept 100% incl. the overloaded clip
+(editorially worse). Exactly the owner's intended behavior.
+
+### Regression / protection (Phase 4 criteria 2–4)
+| Case | v4 | v5 | Gate |
+|---|---|---|---|
+| Explicit music-only | mute 100% | **mute 100%** | ✓ intentional music-only preserved |
+| Guitar performance | keep 100% | keep 100% | ✓ protected |
+| Birthday singing | duck 16% / keep 84% | **keep 100%** | ✓ v5 stops ducking the singing |
+No cross-domain regression; all plans executable (feasible=True).
+
+### 4. Freeze verdict (Phase 4)
+v5 clears criteria 2 (guitar/birthday protected), 3 (music-only preserved), 4 (no regression), 5 (executable).
+Criterion 1 (realistic TMB material improvement): v5 moves TMB from 76%→100% keep timeline-weighted and fixes
+the no-audio-description and unusable-audio cases editorially — a MATERIAL improvement on the best real evidence
+available. BUT because the exact device request could not be recovered and v4 did not reproduce the device
+music-only failure on these records, the device-level fix is NOT yet proven on the real failing input.
+
+RECOMMENDATION: v5 is correct and safe to freeze as the candidate, BUT the owner's condition "reproduce AND
+improve the real TMB failure" is only PARTIALLY met — improved on realistic data, not reproduced on the exact
+device request. The decisive remaining test is a DEVICE re-render on v5 (deploy v5 to dev backend, regenerate
+TMB, read the on-screen native_audio histogram). If that device render stays effectively music-only, Phase 4
+says STOP and diagnose whether the cause is inadequate AU audio evidence (likely — summaries carry no audio),
+prompt behavior, or mixing. Current evidence points at **inadequate audio evidence feeding the planner**, which
+a prompt alone cannot fully fix.
+
+### 7. Remaining risks
+- Exact device request unrecovered; device music-only not reproduced here → device re-render on v5 required.
+- Root signal is MISSING AUDIO EVIDENCE (13/15 summaries silent on sound). v5 mitigates by keeping-by-default,
+  but the real fix may need MomentUnderstanding to describe AUDIO (a separate, owner-gated evidence change) so
+  the planner's duck/mute reasons are grounded — not a further prompt tweak.
+- The renderer duck-under-continuous observation (duck buries native at role=continuous) remains flagged, not
+  changed.
+
 ## STOP — v5 FREEZE GATE
 Stage 1 complete and passing. Per Part D, STOP here for owner freeze approval before stages 3–7 and before any
 production integration. On approval: freeze edit_plan/5 (flip the default or deploy with the env set) and
