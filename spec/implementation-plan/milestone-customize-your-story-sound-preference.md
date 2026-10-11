@@ -51,3 +51,31 @@ editorial Figma language; no sliders/percentages/jargon. Music Picker flow prese
 Phases 1–2 are done and committed. Phase 3 touches request contracts, so per the owner's instruction the
 minimal additive change (`sound_preference` request field on both endpoints) is REPORTED above for approval
 before I implement the wiring + UX. No frozen output schema or prompt changes; renderer untouched.
+
+## UPDATE — Phases 3-5 IMPLEMENTED (owner approved the request field) — 2026-10-11
+- Phase 3 wiring (approved + deployed): `sound_preference: str|None=None` added to MusicPlanRequest +
+  EditPlanRequest (additive, extra=forbid-safe), threaded to engine inputs, injected as a one-line directive
+  into BOTH prompt payloads (NO frozen prompt-file edit). iOS DTOs carry it; resolver refreshes the inferred
+  pref (never clobbering explicit) and passes effective to music-plan AND edit-plan. Commit (app).
+- Phase 4 UX: `CustomizeYourStoryView` replaces the duration sheet — Length (Highlights/Full/Custom via
+  Duration Intelligence, no fixed defaults, whole-row tappable, selected states + concise explanation) + Sound
+  (Immersive/Balanced/Music-led, inferred "Recommended" badge, user override). Explicit choice persisted
+  (authoritative). Figma dark language, no sliders/jargon. Music Picker preserved. Parse-clean.
+- Recompute: effective preference is read on each resolve + each build, so a changed preference re-runs
+  music-plan + edit-plan WITHOUT regenerating StoryGuide/Coverage/Asset Understanding.
+- Phase 5 (backend A/B, LIVE on dev): neutral Story, only preference varies →
+  immersive: role=sparse priority=important · balanced: supportive/selective · music_led: continuous/low ·
+  None: continuous/low. Meaningful, correctly-ordered spectrum; music_led != music-only (priority=low still
+  preserves important native per the directive). 224 tests pass.
+
+## Phase 6 — physical-iPhone acceptance (NOT done — STOP here)
+Rebuild + test on device:
+- selection rows clearly interactive (whole row taps; obvious selected ring/check);
+- recommended duration appropriate to Story scope (Full Story shows the rec rationale);
+- Sound options understandable; the inferred one shows "Recommended";
+- selections persist across relaunch, regeneration, and repeated Create;
+- the three Sound choices produce meaningful, sensible AUDIBLE differences (immersive clearly native-forward,
+  music-led clearly soundtrack-forward but not silent native);
+- TMB immersive + Guitar performance audio remain correct;
+- generated videos save/share correctly.
+STOP for owner at this device gate before Creative Editing V2-b / track adaptation / commercial music.
