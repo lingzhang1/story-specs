@@ -30,6 +30,16 @@ TMB from one root. keep/duck/mute semantics untouched; no global floor; no mute/
 NOTE: the two picker call sites still pass `guideFramingSummary: nil` to recommend() — the Guide JSON now
 carries the signal regardless, but threading the framing summary too is a cheap follow-up.
 
+### 3b. TMB device verification (after 3a) + second fix
+After 3a, the TMB device render STILL logged MusicPlan `priority=low` while music resolved fine
+(`built soundtrackTrack=YES`). Isolation test proved WHY: a thin intent + EMPTY story_guide → `low`, but a
+thin intent + RICH story_guide → `important`. So the device's TMB Story had **NO persisted StoryGuide** — my
+loader correctly passed `{}` because there was nothing to pass. TMB (older/imported) reached music without a
+Guide ever being generated. **Second fix:** `recommend()` now calls `StoryGuideCoordinator.ensureGuide(for:)`
+(generate-once-if-absent, migration-safe) BEFORE loading the Guide, so a guide-less Story gets one and MusicPlan
+sees it. Existing Guides are returned untouched; failure is fire-and-forget (Story stays valid). Still no
+prompt/contract change.
+
 ## 4. Model/contract implications
 NONE. No frozen music_plan/1 prompt change, no contract change, no renderer change, EditPlan/2 untouched. If,
 WITH Guide/Coverage passed, MusicPlan still under-rated a clear ambience/performance Story on device, THEN a
