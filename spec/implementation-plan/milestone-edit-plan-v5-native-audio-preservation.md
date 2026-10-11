@@ -125,6 +125,30 @@ a prompt alone cannot fully fix.
 - The renderer duck-under-continuous observation (duck buries native at role=continuous) remains flagged, not
   changed.
 
+## STAGE 1c — DEVICE render on v5 (Phase 4 STOP+diagnose) — 2026-10-11 14:34
+Device TMB re-rendered with v5 LIVE. On-screen 🎵: `native_audio[duck×17 keep×3 mute×9] role=continuous
+priority=low` (29 segs). Still effectively music-only → Phase 4 requires STOP + diagnose. Diagnosis from logs
+(NOT inferred):
+- EDITPLAN 21:34:26 `prompt_version=edit_plan/5 segs=29` → **v5 WAS live and used.** Not a deploy miss.
+- MUSICPLAN 21:32:55 `priority=low role=continuous` → **this is the cause.** v5's prompt says low permits
+  broader duck/mute, so the planner correctly produced duck/mute. v5 behaved AS DESIGNED on a `low` input.
+- Live isolation: MusicPlan with EMPTY guide → selective/continuous; with RICH TMB guide → important/supportive.
+  So MusicPlan is STILL being starved of the StoryGuide on the device path → returns low/continuous.
+
+ROOT CAUSE (two independent faults, neither is v5):
+1. UPSTREAM MusicPlan input: TMB gets priority=low (+ role=continuous) because the device is NOT feeding
+   MusicPlan a real StoryGuide. The earlier iOS fix (ensureGuide + pass guide/coverage) is either not in the
+   device build or the guide is not generated/passed on this render path. This is the PRIMARY fault — an iOS
+   wiring / audio-evidence problem, and v5 cannot (and must not) override a `low` input.
+2. role=continuous persists in BOTH guide states → even kept native is buried at soundtrack 1.0. The
+   owner-flagged renderer quirk; still not changed.
+
+FREEZE VERDICT: v5 does NOT clear criterion 1 — but NOT because v5 is wrong. v5 is correct and safe (criteria
+2–5 pass). The gate is blocked UPSTREAM: MusicPlan priority/role for TMB. Per Phase 4, STOP — the responsible
+layer is the MusicPlan INPUT (StoryGuide evidence) + role, not another edit_plan prompt change. Do NOT stack
+more prompt edits. Next: verify the iOS guide-passing fix is actually in the device build and that
+ensureGuide runs on this render path; separately decide role=continuous handling.
+
 ## STOP — v5 FREEZE GATE
 Stage 1 complete and passing. Per Part D, STOP here for owner freeze approval before stages 3–7 and before any
 production integration. On approval: freeze edit_plan/5 (flip the default or deploy with the env set) and
