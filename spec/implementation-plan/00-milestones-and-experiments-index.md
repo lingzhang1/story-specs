@@ -113,7 +113,8 @@ build scope: `spec/implementation-plan/mvp-build-plan.md`; frozen contracts:
 | **Native-audio disappearance audit (guitar performance)** | [native-audio-disappearance-audit](./milestone-native-audio-disappearance-audit.md) | — (fix proposed, owner gate) |
 | **Next-page recommendations (music picker)** | [rd7-music-next-page-recommendations](./milestone-rd7-music-next-page-recommendations.md) | — |
 | **Native-audio restoration (TMB+guitar) + V2-b immersive scope** | [native-audio-restoration-tmb](./milestone-native-audio-restoration-tmb.md) | — (device listening + V2-b gate) |
-| **Edit Planner v5 native-audio preservation + Customize Your Story** | [edit-plan-v5-native-audio-preservation](./milestone-edit-plan-v5-native-audio-preservation.md) | STAGE 1 done — AT v5 FREEZE GATE |
+| **Edit Planner v5 native-audio preservation** | [edit-plan-v5-native-audio-preservation](./milestone-edit-plan-v5-native-audio-preservation.md) | FROZEN (dev default) — device-accepted |
+| **Customize Your Story + sound preference** | [customize-your-story-sound-preference](./milestone-customize-your-story-sound-preference.md) | P1-2 done; P3 reported for go |
 | Edit Planner M-d.3 (MusicAnalysis A/B) | md3-api-validation-edit-planner-experiment | edit_planner_md3.json |
 | **Editorial Timing A/B (edit_plan/3 vs 4)** | rd1-editorial-timing… | edit_planner_editorial_timing_ab{,_v2}.json |
 | **Guitar AU audit** | rd1-editorial-timing… | au_guitar_practice_001_audit.json |
