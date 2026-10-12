@@ -136,3 +136,4 @@ build scope: `spec/implementation-plan/mvp-build-plan.md`; frozen contracts:
 | **Editorial coverage: Guide wiring + mode-aware** | [editorial-coverage-guide-wiring-mode](./milestone-editorial-coverage-guide-wiring-mode.md) | wiring fixed; A/B done; mode gate for owner |
 | **Edit Planner v5.1 editorial-mode (experiment)** | [edit-plan-v5-1-editorial-mode](./milestone-edit-plan-v5-1-editorial-mode.md) | deployed to dev; freeze gate for owner |
 | **AU evidence & visual distinctness (girl_with_dress)** | [au-evidence-visual-distinctness](./milestone-au-evidence-visual-distinctness.md) | A/B/C done; forwarding fix for owner |
+| **Creative editorial freedom & user-directed editing (study)** | [creative-editorial-freedom-architecture](./milestone-creative-editorial-freedom-architecture.md) | A/B done; architecture gate for owner |
