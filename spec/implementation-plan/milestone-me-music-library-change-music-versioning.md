@@ -228,3 +228,33 @@ base to diff against.
 Architecture implication: both read prior `editPlanJSON`; V2-b/V2-c persist as new
 versions exactly like Change Music, so the Result-screen version list and the
 "never overwrite" invariant already cover them.
+
+---
+
+## UX UNIFICATION (post-device-video feedback, commit `a552c67`)
+
+Owner device video surfaced three gaps, all converging on one fix:
+1. My Music was not visible at create time.
+2. Import should be offered in the create-time music list.
+3. Change Music should also show the provider recommendation list.
+
+Resolution — ONE shared music chooser. `MusicPickerView` (the create-time picker,
+which already had provider recommendations + search + pagination + preview) now ALSO
+renders a **"Your music"** section: the imported `MyMusicAssetModel` library + an
+**Import from Files…** row. Its `Choice` gained `.myMusic(assetId)`. The Change
+Music sheet was rebuilt to **present the same `MusicPickerView`** (fetching a
+recommendation for the Story), so both surfaces now offer the identical set:
+provider recommendations · My Music · Import · No music. #2 and #3 are literally the
+same component.
+
+Supporting pieces:
+- `SoundPreference.localMixKnobs` — deterministic (role, priority) per preference
+  (immersive→sparse/important, balanced→supportive/selective, music_led→continuous/low),
+  used for imported music which has no backend MusicPlan. Matches the verified live A/B.
+- Create-time My Music resolves LOCALLY into a `MusicSelection` (no backend); the
+  Edit Planner is called with a nil music plan (parity path) and the imported track
+  is a render-time overlay. `musicAssetRef` distinguishes `provider:` vs `mymusic:`.
+- "Use this music" is hidden when there is no selectable provider track (My-Music-only).
+
+Device video review found NO other defects: Change Music → No music produced a new
+version correctly labelled "Created without music", and the visual edit was unchanged.
