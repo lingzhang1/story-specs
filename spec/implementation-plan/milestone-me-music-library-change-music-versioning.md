@@ -258,3 +258,8 @@ Supporting pieces:
 
 Device video review found NO other defects: Change Music → No music produced a new
 version correctly labelled "Created without music", and the visual edit was unchanged.
+
+### Round 2 fixes (device video, commit `f4c7465`)
+1. **"Save to My Music" from the list** — each provider track row has a ★ that saves it as a LICENSING-SAFE favorite: a reference by `providerTrackId` on `MyMusicAssetModel` with NO stored bytes (`relativePath==""`), re-resolved live from the provider on use. It appears in the same "Your music" list (labelled "Saved", preview disabled). Imported files remain byte copies; favorites never are.
+2. **"Create a new version" landed on Home** — `StoryCreatingView.onRecreate` called its own `dismiss()` AND `onRequestRecreate()`, which raced and dropped the Customize sheet. Now it only calls `onRequestRecreate()`; the parent's `showCreating=false` pops the Creating screen and `promptDuration()` presents Customize. Also replaced the Change-Music `fullScreenCover` (which broke the recreate closure chain) with an in-place `swappedOutput`.
+3. **"Still didn't see My Music"** — the section was at the BOTTOM of the picker (below the provider list + pager). Moved "Your music" to the TOP (above "Story's picks"), and added a temporary build stamp on the picker so a stale build is immediately visible.
