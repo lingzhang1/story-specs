@@ -96,3 +96,22 @@ latency change (same single Opus call).
 Residual (separate, owner-scoped-out): near-duplicate padding under Full → an optional dedup heuristic later.
 
 STOP for owner approval before freezing the prompt or building the directives layer.
+
+## Addendum — hiking fixture (5th real dataset)
+Added `evals/scenarios/hiking` (40 files; ~39 unique clips + one genuine duplicate IMG_4469 2.MOV;
+durations 1.6-95s). Two treks (Iceland Laugavegur + Alps TMB), highly distinct: volcanic rhyolite
+terrain, fog, a river crossing (continuous), a hut-café moment (intimate), Mont-Blanc vistas,
+glaciers, lakes, a summit jump. Visual ground truth confirmed via extracted frames.
+
+A/B at 100s Full (same methodology; prompt_version confirmed each arm):
+| | v5.1 | 5.2-exp (freedom) |
+|---|---|---|
+| hiking (39 moments) | **20/39** (11 Iceland / 9 Alps) | **24/39** (13 / 11), 3.5-5s shots |
+
+Consistent with Girl-with-Dress (9-16 → 22): the freedom candidate broadens distinct coverage and
+balances across both trips. Note v5.1 already did better here (20) than on the fashion set, because
+hiking summaries describe inherently more distinct scenes (fog/river/café/glacier) — more for the
+planner to differentiate even before the freedom amendment. Full 5-fixture read: freedom helps most
+where footage is distinct and the intent is breadth/journey (fashion, hiking), is neutral/correct on
+performance (Guitar 6/6, 25s hold) and minimal (Solitude 3/3), and does not fix genuine-duplicate
+padding (redundant control). No change to the architecture recommendation.
