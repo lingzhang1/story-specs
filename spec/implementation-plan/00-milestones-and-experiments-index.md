@@ -132,3 +132,4 @@ build scope: `spec/implementation-plan/mvp-build-plan.md`; frozen contracts:
   verdict (M-d.5). REST stays the production provider.
 - **Deferred, not started:** Creative Editing V2 (natural-language re-cut).
 - Nothing auto-pushed; local commits only.
+| **P0: Concurrent Story processing (event-loop offload)** | [p0-concurrent-story-processing](./milestone-p0-concurrent-story-processing.md) | fix deployed to dev; device gate |
