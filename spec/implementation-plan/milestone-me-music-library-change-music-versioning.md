@@ -157,3 +157,74 @@ stored plan minimally. Neither is implemented in M-e.
 - My Music local BPM/beat estimation is best-effort; absence is honest-empty, mix degrades to energy-only (same graceful path as provider tracks lacking beats).
 - A My Music asset removed after a version referenced it → that version re-opens as no-music (bytes gone); documented, not a crash.
 - Licensing: provider tracks are never permanently stored; only user-owned imports are.
+
+---
+
+## IMPLEMENTATION RESULTS (M-e)
+
+Commits (app repo, not pushed):
+- `65eac50` — foundation: `EditPlanV2`/`EditSegmentV2`/`Transition`/`MusicAlignment` → `Codable`; `GeneratedOutputModel` + `versionId`/`parentVersionId`/`operationType`/`editPlanJSON`/`soundtrackRole`/`nativeAudioPriority`/`soundPreferenceRaw`/`musicAssetRef` (all defaulted = migration-safe); `MyMusicAssetModel` + schema registration; `persist()` writes the post-refinement executable plan JSON on every original render.
+- `5d7ed7a` — engine: `MyMusicStore` (fileImporter import → managed `<Documents>/mymusic/`, sha256 dedup, corruption/DRM rejection, remove); `LocalMusicAnalysis` (duration + coarse normalized energy curve from decoded PCM; bpm/beats honestly empty, never fabricated); `SoundtrackReplacer` (Change Music engine — reuse persisted plan verbatim, swap soundtrack + mix knobs, re-render, save new version); `ChangeMusicVersioningTests` (round-trip + lineage + legacy-refusal).
+- `a06b01f` — UI: `ChangeMusicSheet` (My Music list, import-from-Files, preview via `.playback` session, rename, remove, no-music; dark editorial, no sliders/BPM) + Result-screen "Change music" wired, gated on a persisted plan, lands on the new version via `fullScreenCover` while the previous output stays in the version list.
+
+Spec doc: `a3cece8`.
+
+### Correctness proof (sandbox-runnable)
+A standalone Swift round-trip (encode→decode→decode) of a representative EditPlan/2
+asserted that EVERY visual field survives: segment count, target duration, output
+format, per-segment `asset_id`, source in/out, `output_duration`, `speed`,
+`native_audio`, and `transition` (dissolve+duration / cut), plus `music_alignment`.
+This is the guarantee behind "same visual edit, different soundtrack." Mirrored as
+`ChangeMusicVersioningTests` for the device/Xcode run.
+
+### Regression (Phase 4) — status
+- Backend suite: **224 passed** (backend untouched by M-e).
+- iOS: all touched + new files parse-clean; `ChangeMusicVersioningTests` added. Items 1-13 and the "exact timeline, not similar" check are exercised by the engine + tests at the logic level; the ones that require real AVFoundation export (actual MP4 re-render, audible native-audio, Save/Share) are device-gate items (Phase 5), by design — AVAssetExportSession does not run in the sandbox.
+
+### Phase 5 — physical-device acceptance checklist (owner)
+Build on the phone, then verify:
+1. Import a local audio file via Files → it appears under From your music.
+2. Preview it (audible with the mute switch on) and it shows name + length (no BPM).
+3. It persists after force-quit + relaunch, and is reusable in a DIFFERENT Story.
+4. Re-import the same file → no duplicate row (dedup).
+5. On an existing Story: Change music → pick a My Music track → new video renders; the VISUAL edit (cuts/timing/pacing) is unchanged; only the soundtrack differs.
+6. Change music → No background music → native audio is preserved and audible.
+7. The previous version still opens (not overwritten); the new one is a separate version.
+8. Remove a My Music track that a version used → that version re-opens as no-music, no crash.
+9. A legacy video (made before this build) shows "Change music" disabled with the honest reason.
+10. Save/Share the re-soundtracked MP4 works.
+
+**STOP for owner acceptance here.** No push; frozen contracts unchanged.
+
+### Contract implications (final)
+No frozen wire-contract change. `EditPlanV2` renderer DTO gained `Encodable`
+(local round-trip only). `GeneratedOutputModel` + `MyMusicAssetModel`: additive
+SwiftData migration, every new field optional/defaulted. Change Music is a
+client-side re-render — no new backend endpoint, Edit Planner never invoked.
+
+---
+
+## Phase 6 — V2-b / V2-c roadmap (DESIGN ONLY — not implemented in M-e)
+
+The version lineage built here is the shared substrate for both future ops; neither
+needs a schema change beyond new `operationType` values.
+
+**V2-b — Create Another Version** (`operationType="another_version"`):
+reads the parent chain's `editPlanJSON`(s) to steer AWAY from already-used moments,
+source ranges and openings — variation is EVIDENCE-driven (alternative strong
+moments, omitted footage, different source ranges/pacing/emphasis), never random,
+never forced when footage is thin, never at the cost of narrative coherence or
+native audio. Diversity is measured SEPARATELY from editorial quality (two metrics:
+a timeline-overlap/opening-difference score vs the existing quality eval). This DOES
+invoke a variation-aware planner (unlike Change Music).
+
+**V2-c — Natural-Language Refinement** (`operationType="edit_ai"`):
+uses the existing Figma feedback UX. An instruction ("start with the girl",
+"include the blue dress", "keep the ending, change the opening") resolves references
+against ALL MomentUnderstanding (incl. omitted footage), applies a MINIMAL edit to
+the stored plan, and preserves unaffected segments. Reuses `editPlanJSON` as the
+base to diff against.
+
+Architecture implication: both read prior `editPlanJSON`; V2-b/V2-c persist as new
+versions exactly like Change Music, so the Result-screen version list and the
+"never overwrite" invariant already cover them.
