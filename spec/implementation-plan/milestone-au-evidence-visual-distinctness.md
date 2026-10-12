@@ -82,3 +82,28 @@ gate (cents). No change to per-render latency.
 Re-import the real girl_with_dress set; render Full at ~100s; verify both the green and paisley
 dress days appear, several distinct locations are represented, and no multi-minute wait — vs the
 current 9-of-36.
+
+---
+
+## IMPLEMENTATION — Arm B (commit `9ddc6c2`)
+`EditPlanRequestBuilder.understandingSummary` now builds a deterministic, bounded factual
+description from the ALREADY-PERSISTED AU output: `summary · subjects: … · events: … · note`.
+- Only real present fields used (graceful on absent); de-duplicated across summary/subjects/events; 600-char cap so a 36-Moment request stays measurable; original AU output untouched; Moment ids + useful_segments unchanged; no new field/model/prompt/contract.
+- Tests (`EditPlannerCaseGTests`): rich evidence reaches the planner (red-tote in subjects + facade in events now forwarded); summary-only records still yield just the summary; bounded ≤601 chars; no fabricated outfit/colour; ids + useful_segments preserved. Backend suite 224 pass.
+
+## PHASE 3 — real frozen-AU richness (decisive honesty check)
+Ran the REAL frozen `/v1/asset-understanding` on two actual clips:
+- **IMG_2273 (green):** summary + subjects captured "teal/green maxi dress + white lace overshirt", "cathedral/church facade (Seville)", "iron chain barrier", "cobblestone plaza".
+- **IMG_2340 (paisley):** captured "white off-shoulder top, floral maxi skirt, **red tote bag**", "Moorish stucco / Arabic calligraphy", "zellige tilework", "colonnaded gallery".
+
+**The real AU already produces the outfit / accessory / location distinctions.** The loss was
+purely forwarding (summary-only). This confirms Arm B will deliver on real data and vindicates
+rejecting a new AU pass / new field. (Caveat: AU summaries here are already rich, so for these two
+clips forwarding subjects/events is incremental; the fix is decisive on clips that put a key fact
+in subjects/events but not the summary — e.g. the red tote.)
+
+## Freeze readiness
+Arm B is additive and low-risk. v5.1 freeze still gated on the **device render** (Phase 4): confirm
+both dress days + distinct settings represented at ~100s, near-duplicates not padded, pacing/native-
+audio/duration intact — vs the prior 9-of-36. Recommend freezing v5.1 as the dev default only after
+that device confirmation.
