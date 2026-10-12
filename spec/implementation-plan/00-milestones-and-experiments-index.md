@@ -133,3 +133,4 @@ build scope: `spec/implementation-plan/mvp-build-plan.md`; frozen contracts:
 - **Deferred, not started:** Creative Editing V2 (natural-language re-cut).
 - Nothing auto-pushed; local commits only.
 | **P0: Concurrent Story processing (event-loop offload)** | [p0-concurrent-story-processing](./milestone-p0-concurrent-story-processing.md) | fix deployed to dev; device gate |
+| **Editorial coverage: Guide wiring + mode-aware** | [editorial-coverage-guide-wiring-mode](./milestone-editorial-coverage-guide-wiring-mode.md) | wiring fixed; A/B done; mode gate for owner |
