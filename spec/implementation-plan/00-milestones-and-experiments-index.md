@@ -137,3 +137,4 @@ build scope: `spec/implementation-plan/mvp-build-plan.md`; frozen contracts:
 | **Edit Planner v5.1 editorial-mode (experiment)** | [edit-plan-v5-1-editorial-mode](./milestone-edit-plan-v5-1-editorial-mode.md) | deployed to dev; freeze gate for owner |
 | **AU evidence & visual distinctness (girl_with_dress)** | [au-evidence-visual-distinctness](./milestone-au-evidence-visual-distinctness.md) | A/B/C done; forwarding fix for owner |
 | **Creative editorial freedom & user-directed editing (study)** | [creative-editorial-freedom-architecture](./milestone-creative-editorial-freedom-architecture.md) | A/B done; architecture gate for owner |
+| **V2-b.1 — Edit Planner v5.2 candidate & device gate** | [v2b1-edit-planner-v5.2-candidate-and-device-gate](./milestone-v2b1-edit-planner-v5.2-candidate-and-device-gate.md) | Candidate promoted (commit 1598949); freeze pending on-device render; default stays v5.1 |
