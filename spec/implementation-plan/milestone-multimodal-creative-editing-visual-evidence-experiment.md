@@ -349,3 +349,66 @@ Executability: all arms 100% valid. Shot-duration: appropriate in all; count is 
 
 **STOPPED at the owner device/listening quality gate. B not frozen or deployed. Nothing pushed. No NL
 refinement or unrelated work.**
+
+---
+
+# Creative-Objective Series — Experiment 1: Short-Form Social Editing Intelligence
+
+**Date:** 2026-10-13 · **Status:** experiment complete (17/20 cells; 3 secondary cells quota-blocked) · **Spend:** $7.44 of $20 · **No production change, no frozen-prompt/contract change, nothing pushed.**
+
+## Objective
+Short-form social video optimized for *immediate engagement* — attention captured fast, held through **meaningful** variation. Explicitly **NOT** "maximize cuts" or "always cut on the beat". Clip count is not a success metric.
+
+## Setup (frozen & verified)
+- Edit Planner **frozen v5.2 body VERBATIM** across every arm — `prompts/edit_plan/5.2`, sha12 `d1116552f2ff` (asserted in the runner; run aborts if it drifts). The creative brief is injected into the **user message**, never the frozen body.
+- **AU reused** from Experiment-0's committed exports (`outbox/*_au_and_editplans.json` → rebuilt au_cache) → **$0 AU cost, identical source evidence** across all arms. Real `asset_understanding/v1` output, labeled.
+- EditPlan/2 schema + deterministic validator imported from `packages/edit_planner` (production gate). Same model (Opus 4.6), temperature 0, max_tokens 8192, empty guide/coverage/music held constant.
+- Datasets: `girl_with_dress` (36 clips), `hiking` (40 clips). Durations: **30s primary, 60s secondary**. Seed 20261013. Runner: `evals/multimodal_edit/run_shortform_experiment.py`.
+
+## Arms (evidence/direction is the ONLY delta)
+- **A1** — rich AU text, no brief. *(baseline)*
+- **A1c** — A1 text **+ short-form creative brief** (text-only + brief; isolates the visual contribution).
+- **B** — A1 text **+ Tier-1 contact sheets** (one tiled JPEG/Moment), no brief.
+- **C** — B **+ creative brief**.
+- **D** — C **+ one bounded critique→revision** (self-critique vs the brief as plain text, then one revise call).
+
+## Phase 3 results — 30s PRIMARY (both datasets complete)
+
+| ds | arm | valid | segs | variety | reuse | med shot | dur err% | native-audio keep | first shot |
+|---|---|---|---|---|---|---|---|---|---|
+| girl | A1 | ✓ | 12 | 0.92 | 1 | 3.0s | +18% | 12/12 | static "train platform establishes travel" |
+| girl | A1c | ✓ | 11 | 1.00 | 0 | 3.0s | +11% | 10/11 | **"striking posed profile, cathedral, golden light, fashion hook"** |
+| girl | B | ✓ | 11 | 1.00 | 0 | 3.0s | +13% | 2/11 | static "back-to-camera pose at cathedral" |
+| girl | C | ✗¹ | 13 | 0.92 | 1 | 3.0s | +13% | 11/13 | "cathedral back-to-camera pose" |
+| girl | D | ✓ | 13 | 1.00 | 0 | 2.5s | +10% | 4/13 | **"hook — windswept hair on Alhambra balcony, striking movement"** |
+| hiking | A1 | ✗² | 8 | 0.88 | 1 | 3.8s | +4% | 6/8 | static "wide Alpine valley panorama" |
+| hiking | A1c | ✓ | 9 | 1.00 | 0 | 3.5s | +8% | 9/9 | "dramatic volcanic landscape, immediate hook" |
+| hiking | B | ✓ | 7 | 1.00 | 0 | 4.0s | +2% | 7/7 | static "volcanic highland establishes terrain" |
+| hiking | C | ✓ | 9 | 1.00 | 0 | 3.5s | +5% | 9/9 | "opening_landscape_hook" |
+| hiking | D | ✓ | 9 | 1.00 | 0 | 3.5s | +9% | 9/9 | **"hook — arms spread wide against alpine peaks, human energy and joy"** |
+
+¹ girl C invalid: seg12 0.3s shot with 0.8s fade (infeasible micro-shot) — executability finding.
+² hiking A1 invalid: seg7 output 3.5s inconsistent with 6.0s source span — executability finding.
+
+60s SECONDARY: girl all 5 arms complete (A1c invalid: 73.7s >20% off 60s target); hiking A1+A1c complete; **hiking 60s B/C/D blocked by a Bedrock per-day token quota** (image-heavy arms) — backfill after daily reset; conclusions do not depend on them.
+
+## What actually moved (evidence, not counts)
+1. **The critique/revision pass (D) is the single highest-value lever — and the hook is where it shows.** On BOTH datasets D's critique correctly diagnosed that the no-brief opener is a *static landscape/back-to-pose*, named a specific stronger hook, and **its revision then led with exactly that shot** (girl: windswept balcony movement; hiking: "arms-spread celebration IMG_4217"). This is model-generated but **acted-upon** improvement, not just commentary.
+2. **D finds high-value OMITTED footage and repetition that text+images alone miss.** It flagged *"6 of 13 segments are back-to-camera walks — dulls variety despite different locations"* (girl) and *"IMG_4217 … the most expressive, social-ready shot in the entire set, completely absent"* (hiking). Directly answers the owner's "high-value omitted footage" + "meaningful variation" metrics.
+3. **The brief alone (A1c/C) already improves variety and kills repetition** — A1c/B/C reach variety ratio 1.0 with zero reused clips, and consistently reframe shot 0 as an explicit hook. Cheap (~$0.20/arm, no images).
+4. **Images (B) did NOT fix the hook** — B still opened on a static landscape on both datasets. The hook gain came from the **brief/critique**, not pixels. B costs ~4–5MB/call and was the first to hit the daily token quota. Visual evidence's value here is source-range nuance, not attention-grab.
+5. **Honest regression watch:** the brief's "quick cuts" nudge **trades away native audio** in some arms (B 2/11, D 4/13 keep on girl). For social this is often fine (music bed), but it must be a conscious choice, not silent.
+6. **Executability at 30s:** 2 of 10 primary plans proposed infeasible micro-shots (0.3s shot vs 0.8s fade; output/source mismatch). Short-form's push toward very short shots stresses the validator's feasibility rules — a real finding for any production push.
+
+## Phase 5 — decision
+**Largest measurable quality improvement = explicit creative direction + a bounded critique/revision pass (D), not multimodal frames.** Evidence order of value for this objective: **brief (A1c/C) ≈ free and reliable → critique/revision (D) = best hook + omission detection → images (B) = marginal for engagement, real cost.** 
+
+- If promoted later (owner-gated, NOT done here): the cheapest high-value path is **(1) a short-form creative-direction preset + (2) a single critique/revision pass**, both at the *application* layer — no frozen-prompt edit, no new contract, no multimodal upload for production users.
+- **Multimodal B stays experimental.** It did not earn its cost against the engagement objective.
+- Native-audio behavior under a "quick cuts" brief must be an explicit control before any promotion.
+
+## Human review (Phase 4)
+10 blind-labeled 30s candidates rendered (`girl_with_dress_30s_candidate_{P..T}.mp4`, `hiking_30s_candidate_{P..T}.mp4`) — faithful planner-output previews (exact ranges, plan order, native audio; **not** the production MediaEngineV1 render — no soundtrack/transitions/crop). Letter↔arm key withheld for a blind ranking. Owner's manual girl_with_dress reference: **not present on disk** — not included.
+
+## STOP
+Stopped before production implementation, prompt freeze, and deployment. No push. No NL refinement or unrelated work. Backfill hiking-60s B/C/D after the Bedrock daily-quota window resets if the secondary duration matters.
