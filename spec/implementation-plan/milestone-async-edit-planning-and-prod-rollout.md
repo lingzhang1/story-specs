@@ -42,8 +42,24 @@ The owner asked to "flip async creation ON by default (iOS only, no backend prod
 | Critique/revision | `StoryMultimodalPlanning.critiqueRevisionEnabled` | **ON** (2026-10-13, owner "best results") | flipped ON — Arm D is the largest quality lever; kill-switch `STORY_CRITIQUE_REVISION=0`. Tradeoff: 2 extra model calls re-sending ~3MB images, quota-fragile → more Sonnet fallback under the Opus daily cap |
 | Post-plan refinement | `StoryCreativeRefinement.enabled` | **ON** (2026-10-13, owner "best results") | flipped ON — deterministic pre-pass, no-op when nothing to improve; gained a kill-switch `STORY_CREATIVE_REFINEMENT=0` |
 
-So the flag-flip request required **no code change**. Critique stays an explicit opt-in by the owner's
-standing decision; the device screenshots showing `critique=true` were a per-device UserDefaults override.
+So the flag-flip request required **no code change**. The device screenshots showing `critique=true`
+were a per-device UserDefaults override; as of app `5126b08` critique + refinement are the shipping default.
+
+### Product decision (owner, 2026-10-13): full quality ON for Visual-first in production
+The Customize screen already makes the user choose the path explicitly:
+- **Storytelling** → text-only (`/v1/edit-plan`), cheap, 1 model call, no images.
+- **Visual-first** → the full premium path (multimodal + critique/revision + refinement), ~3 model calls
+  each carrying the contact sheets.
+Decision: ship Visual-first with everything ON in production. The user opts into the premium path, so if
+the output quality justifies the cost, that is a tradeoff the customer is choosing. No code change needed.
+
+**Honest caveat (capacity, not billing):** "the customer pays for the quota" is a product INTENT, not a
+current mechanism. There is NO per-customer token metering or billing passthrough today — every create
+draws on the single shared Bedrock daily token quota of the Story AWS account. So a burst of Visual-first
++ critique creates drains the ACCOUNT-WIDE Opus daily cap, and once exhausted the fallback (Sonnet, then
+`provider_exhausted`) affects ALL users, including cheap Storytelling creates. Treat prod Opus quota
+headroom as a launch-blocking capacity item (see Preconditions). If/when real per-user cost control is
+wanted, that is a separate billing/metering milestone, not part of this rollout.
 
 ## 3. Production rollout plan (HOLD — do not execute without owner go)
 
