@@ -73,3 +73,42 @@ POST /v1/edit-plan-jobs/{job_id}/cancel -> {status:"cancel_requested"|terminal} 
   on completed, fetch plan -> render on-device (unchanged MediaEngineV1). Recover after restart via stored
   job_id. Try-Again reuses the SAME operation_id (no dup inference) unless it's a new version.
 - Honest progress stages from status (queued/running/…); never show a raw 502 as a creative failure.
+
+## CORRECTNESS AMENDMENTS (2026-10-13, before provisioning — smallest necessary changes)
+
+1. **Ownership is NOT a client string.** The client-supplied `owner` is advisory only and MUST NOT be trusted
+   as identity. Dev gate: App Runner derives the caller identity from the request context it already trusts
+   (there is no end-user auth in dev yet), stores it as `owner`, and GET/cancel are scoped to the stored owner.
+   The job_id is a UUIDv5 of operation_id — NOT guessable from a sequence — so it also acts as a capability
+   token for status reads in dev. A client cannot read/cancel another job by guessing. (A real auth principal
+   replaces this when auth lands; out of scope here.)
+
+2. **Idempotency detects CONFLICTING payloads.** The same operation_id with a DIFFERENT request is a client
+   bug, not a legitimate retry. On submit we compute `payload_fingerprint` = sha256(body JSON + sheet_order +
+   critique flag + approach) and store it on create. A second submit with the same operation_id but a
+   DIFFERENT fingerprint is REFUSED with 409 (conflict) rather than silently returning the old job. Same
+   fingerprint -> idempotent recovery (200/202 with the existing job_id).
+
+3. **Lease prevents duplicate active execution AND stale result publication.** claim_lease already blocks a
+   second active runner. ADDITIONALLY, complete()/fail() are now conditional on BOTH status=running AND the
+   SAME lease token the worker claimed: a stale worker whose lease expired (and whose job was re-claimed by a
+   fresh worker) can no longer publish a result over the newer run. lease_token = uuid4 set at claim.
+
+4. **Cancellation reaches terminal + cleans staging.** cancel on `queued` -> worker sees cancel_requested at
+   lease time and goes straight to `cancelled` (no model call); cancel on `running` -> worker checks
+   is_cancel_requested at each boundary (before critique, before result publish) and finalizes `cancelled`.
+   BOTH terminal cancellations delete the staging prefix. If the worker already finished, cancel is a no-op
+   on the completed job (returns terminal status).
+
+5. **TTL is NOT immediate deletion.** DynamoDB TTL deletes within ~48h, not at the instant expires_at passes.
+   So a job past expires_at that is still present is treated as `expired` by READS (GET returns status=expired
+   when now > expires_at regardless of the stored status), and the reconcile sweep finalizes it. We never rely
+   on the row being gone. Staging has its OWN 24h S3 lifecycle independent of the job row.
+
+6. **Lost-enqueue reconciliation does NOT cause uncontrolled dup model calls.** The reconcile sweep re-enqueues
+   ONLY jobs that are status=`queued` AND older than RECONCILE_AFTER (60s) AND have attempt_count=0 (never
+   leased). Once a worker claims the lease (attempt_count>=1, status=running), reconcile ignores it. Re-enqueue
+   is bounded: a job re-enqueued MAX 2 times then -> failed(category=enqueue_lost) to the DLQ path. SQS
+   at-least-once can still deliver a message twice, but the lease (concern 3) makes the SECOND delivery a no-op,
+   so redelivery never doubles inference. We explicitly do NOT claim exactly-once model invocation; we claim
+   bounded, de-duplicated execution.
