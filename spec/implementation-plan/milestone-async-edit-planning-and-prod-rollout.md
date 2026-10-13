@@ -39,8 +39,8 @@ The owner asked to "flip async creation ON by default (iOS only, no backend prod
 | Async creation path | None — the sync `EditPlannerService` path is no longer reachable from creation; `EditPlanJobClient` is the sole path | always async | already done |
 | Multimodal planning | `StoryMultimodalPlanning.enabled` (`_enabledDefault = true`; kill-switch via env/UserDefaults) | **ON** | already done |
 | Editing approach | `EditingApproach` default | **visual_first** | already done |
-| Critique/revision | `StoryMultimodalPlanning.critiqueRevisionEnabled` | **OFF** | intentionally OFF (owner rule: heaviest, 2 extra model calls re-sending ~3MB images, quota-fragile) — NOT changed |
-| Post-plan refinement | `StoryCreativeRefinement.enabled` | **OFF** | intentionally OFF until device-accepted — NOT changed |
+| Critique/revision | `StoryMultimodalPlanning.critiqueRevisionEnabled` | **ON** (2026-10-13, owner "best results") | flipped ON — Arm D is the largest quality lever; kill-switch `STORY_CRITIQUE_REVISION=0`. Tradeoff: 2 extra model calls re-sending ~3MB images, quota-fragile → more Sonnet fallback under the Opus daily cap |
+| Post-plan refinement | `StoryCreativeRefinement.enabled` | **ON** (2026-10-13, owner "best results") | flipped ON — deterministic pre-pass, no-op when nothing to improve; gained a kill-switch `STORY_CREATIVE_REFINEMENT=0` |
 
 So the flag-flip request required **no code change**. Critique stays an explicit opt-in by the owner's
 standing decision; the device screenshots showing `critique=true` were a per-device UserDefaults override.
