@@ -269,3 +269,83 @@ measured gap remains.
 
 **STOPPED at the architecture/freeze decision. No production change, no new frozen prompt, nothing pushed,
 no unrelated work. Arm C not run pending owner review.**
+
+---
+
+# ADDENDUM 2 — A1 IMPLEMENTED + source-range quality gate (owner decision 2026-10-12 PM)
+
+Owner reviewed A0/A1/B: **approve A1** (richer factual AU forwarding + event timestamps, bounded); **do NOT
+promote B**; **no broad Arm C until targeted source-range quality is established**. Goal: better artistic
+selection + precise ranges, not more clips/images.
+
+## Part A — A1 implemented (app commit 78da143, iOS-only, NOT pushed)
+
+`RenderSupport.swift`: new `richEvidence()` + `evidenceField()` emit a BOUNDED, STRUCTURED `evidence` object
+per Moment ALONGSIDE the legacy `summary` (kept for back-compat / Duration Planner). Replaces the destructive
+single 600-char prose cap with per-field bounds that keep **event timestamps explicit as structure**, not
+prose: summary ≤320, subjects ≤10 (deduped, ≤80 ea), events ≤8 as `{t, t_end?, what≤90}`, temporal note ≤200,
+whole object hard-capped ~1400 chars (drops tail events if exceeded). No fabrication (only present AU fields).
+- **No frozen change:** AU prompt untouched, EditPlan/2 untouched. `evidence` is an additive request field;
+  backend `EditPlanRequest.moments: list[dict]` accepts it (verified: it reaches `_build_user` payload; the
+  deterministic validator is unaffected). The planner already treats moment payload as grounding.
+- **Tests:** `RenderSupportRichEvidenceTests.swift` — missing fields, long clips, many events (bounded),
+  structured timestamps, dedupe, per-field + overall payload bounds, backward-compat (no observed → no field).
+  Parse-clean. Backend suite still 100% (iOS-only change).
+- **Request-size / latency (measured on 82 real cached AU clips):** A0 summary averaged **601 chars and
+  EVERY clip (82/82) hit the 600 cap** — A0 was truncating every Moment, losing info universally. A1 averages
+  **1211 chars/Moment (+610, ~+152 tokens)**. Projected **+~15k input tokens at 100 Moments** — bounded by
+  the hard ceiling, ~+$0.08/request at Opus input pricing. Acceptable and capped.
+
+## Part B — Human-reviewable A1/B source-range comparison (video + audio + AU + measured audio)
+
+Recovered exact ranges from the saved plans; cut real excerpts (video+AUDIO, `trim_excerpt.swift`); judged
+against AU events + a measured audio-RMS probe (`audio_rms.swift`). **Verdict is genuinely MIXED:**
+
+| Clip | A1 range | B range | Finding |
+|---|---|---|---|
+| **final_song** | 3.0–39.3s | 15.0–39.3s | **B REGRESSED.** AU: continuous playing 0–39.3s; useful_segment [0–15]="hands actively playing". Audio RMS of the dropped 3–15s = **0.04–0.076, as loud as the kept part** → B cut ~12s of the musical phrase. A1 is right. |
+| **hiking IMG_4469** | 0.0–14.0s | 14.0–27.2s | **B WON.** A1 took the climb and MISSED the payoff; B's 14–27.2s captures AU's [20–22] "triumphant pole-raise" + [22–27.2] Mont Blanc summit face reveal. Visual evidence clearly helped. |
+| **IMG_2359** | not selected | 0.0–4.0s | Selection difference; B chose the person-led balcony opening. |
+| **IMG_2550** | 35–42s (one range) | not selected | Both used ≤1 range from a clip AU says has 5 (see Part C). |
+
+Paired excerpts delivered to the dashboard for owner eye/ear. **Do NOT call B better from differing boundaries
+alone** — it is better on hiking, worse on guitar. The errors are **reasoning/criteria, not frame density.**
+
+## Part C — Multiple highlights per Moment (feasibility: YES, no new contract)
+
+IMG_2550 (58s) — AU **already enumerates 5 distinct useful_segments** in one clip: [0–7] walk-away w/ dome,
+[7–10] architectural wide, [10–16] first face reveal, [35–50] best face shots, [50–58] closing door image.
+These are independently valuable shots. **EditPlan/2 already supports multiple segments with the same
+`asset_id` and different source ranges** (asset_id is not unique per segment; validator allows it). So the
+mechanism EXISTS end to end — AU finds the sub-ranges, the contract can express them — but **the planner
+currently picks ≤1 range per Moment**, treating a Moment as a coarse unit. This is the single clearest
+improvement lever and needs **no new contract and no new model pass** — it is a planning/selection behavior,
+addressable via the A1 evidence (which now carries all 5 segments' timings) + a prompt-level nudge (future,
+owner-gated; NOT done here as it would touch the planner prompt).
+
+## Part D — Targeted Arm C decision: **NOT justified by this review**
+
+Arm C's premise is "A1/B miss brief actions / cut boundaries *because frames are too sparse*." The two real
+failures here are NOT density-limited: the guitar miss is a **reasoning** error (B had ample frames, chose a
+worse start), and the IMG_2550 under-use is a **planning** limitation (AU already supplies the segments). Denser
+frames fix neither. **Recommendation: do NOT spend on Arm C now.** The budget is better aimed at the
+multiple-highlights planning behavior (Part C) and a candidate/critique pass (Phase 5).
+
+## Part E — Quality gate (summary)
+
+Meaningful selection: A1 ≥ A0 (richer evidence, every clip previously truncated). Continuous-action/musical-
+phrase: **A1 preserves, B can break (guitar)** → another reason not to promote B. Visual variety: B sometimes
+finds a better payoff (hiking) but inconsistently. Native-audio: preserved (keep-dominant) across arms.
+Executability: all arms 100% valid. Shot-duration: appropriate in all; count is not the metric.
+
+## Remaining architecture / freeze decisions
+
+1. **A1 is implemented and ready for your device/listening gate** (dev deploy of the iOS build is a device
+   action; the backend needs no change). Nothing frozen, nothing pushed.
+2. **B (multimodal) stays experimental** — mixed quality, unproven; not promoted.
+3. **Highest-value next lever (Part C): teach the planner to pull multiple sub-ranges from one rich Moment** —
+   no new contract, A1 evidence already carries the segment timings. Owner-gated (touches planner prompt).
+4. **Candidate/critique pass (Phase 5)** remains on the roadmap for the reasoning-class errors B exposed.
+
+**STOPPED at the owner device/listening quality gate. B not frozen or deployed. Nothing pushed. No NL
+refinement or unrelated work.**
