@@ -185,3 +185,87 @@ consumer; none is added until a concrete gap is demonstrated.** Frozen contracts
 
 **STOP for owner review before any production change. No AU or Edit Planner prompt frozen. No NL editing or
 advanced effects. Unrelated changes preserved. Nothing pushed.**
+
+---
+
+# ADDENDUM — A0/A1/B experiment EXECUTED (owner-approved $20 gate), 2026-10-12
+
+Runner: `evals/multimodal_edit/run_experiment.py` (experiment-only; frozen v5.2 body verbatim across arms;
+EditPlan/2 schema + deterministic `validate_plan` imported from `packages/edit_planner`; model, temperature 0,
+max_tokens identical across arms; only the per-Moment EVIDENCE differs). Multimodal uses the gateway's
+EXISTING `StructuredRequest.images` surface — **no model change, no new wrapper, no prompt/contract edit.**
+Fresh AU is REAL `asset_understanding/v1` output (Sonnet 4.6, 24 frames au_frames/1), cached, cost-tracked,
+labeled real. Result JSON: `evals/results/multimodal_edit_experiment.json` (gitignored; on disk).
+
+**Arms as run:** A0 = production 600-char folded summary + useful_segments. A1 = richer AU text (fuller
+subjects, events WITH timestamps, temporal note, NOT 600-capped; no fabrication). B = A1 + ONE timestamped
+Tier-1 contact-sheet JPEG per Moment (4–9 duration-scaled frames tiled + labeled). **C = NOT RUN — gated on
+owner review** (see below). **Total spend $6.95 / 52 calls — well under $20.** Every arm produced a
+deterministically-VALID EditPlan/2.
+
+## Results
+
+| Dataset | A0 | A1 | B |
+|---|---|---|---|
+| **girl_with_dress** (36) | 21 seg / 21 distinct / med 5.0s | 22 / 18 / 4.55s | 17 / 17 / 6.1s |
+| **hiking** (40) | 14 / 14 / 7.5s | 12 / 12 / 8.75s | 13 / 13 / 8.0s |
+| **guitar** (6, regression) | 6 / 6 / 7.0s | 6 / 6 / 7.2s | 6 / 6 / 8.4s |
+
+Source-range precision (the real multimodal signal): on **shared** moments, B shifts source in/out vs A1 by
+**median 3.0s (girl), 4.8s (hiking)** — B is making different, visually-informed boundary choices, not just
+reshuffling selection. B also re-selected footage (girl A1∩B = 12; it dropped some A1 picks and added others)
+and consolidated toward fewer, longer holds.
+
+## Findings (clip count is NOT the metric)
+
+1. **Information loss is real and measured.** A0's 600-char cap truncates mid-sentence on rich clips — e.g.
+   IMG_2359's A0 string hit the cap at "…contemplative po" and **dropped the entire subjects list** (green
+   tassel earrings, black sunglasses, floral dress — the exact visual-distinctness cues) and the event
+   timeline. A1 keeps all of it + event timestamps. This is the lever behind the earlier 16→22 text-only gain.
+2. **A1 (richer text) is a cheap, real win on dense footage** and essentially free (~$0.02/arm, no images).
+3. **B (visual) changes JUDGMENT, not quantity.** It moved source ranges by seconds and re-weighted selection
+   toward distinct looks + longer holds — consistent with "see the frames, pick the better window." Whether
+   those moves are *better* needs the human/visual review the owner's criteria require (not model confidence).
+4. **Regression guards held.** Guitar 6/6 all arms, native keep, the final-song preserved as ONE continuous
+   hold. **Watch-item:** B started the final-song hold at 15s vs A0/A1's 3s (36.3s → 24.3s) — not fragmented
+   (continuity intact), plausibly trimming tuning lead-in, but needs the human ear to call better-or-worse.
+   Solitude: not run (no dedicated dir); hiking's calm clips are the nearest proxy and B did not fast-cut.
+5. **Scaling wall discovered:** the naive "all Moments' frames as separate image blocks" overflowed Converse
+   ("Input is too long") at 36 moments. ONE tiled contact-sheet per Moment fixed it (36 moments → 36 images,
+   ~5MB). Any production visual path MUST tile, not stream raw frames.
+
+## Cost / latency / privacy
+
+- Cost: AU (fixed setup, cached) dominates (~$5–8 for 76+ clips); the planner arms themselves are cheap
+  (A0/A1 ~$0.1–0.2 each; B ~$0.4 incl. ~5MB images). Latency: A0/A1 ~21–35s; B ~27–34s (images add little).
+- Privacy/transport: only bounded derived JPEGs sent to the DEV planner; no full video; no frame store; scratch
+  session-reclaimed; no image payloads logged (counts + bytes only). Retention = in-request only.
+
+## Decision — Arm C gating
+
+C's trigger ("B shows a meaningful remaining source-range-precision gap") is **arguably met** — B does move
+boundaries — BUT whether B's boundaries are already good enough (making C unnecessary) vs still imprecise
+(justifying C) **can only be judged by the human/visual review the owner mandated.** Running C now would spend
+more without that ground truth. Recommendation: **owner reviews the sample contact sheets + the A1→B boundary
+shifts; THEN decide C.**
+
+## Architecture recommendation (minimum evidence-supported)
+
+Resolving the owner's decision tree against the data:
+- **A1 substantially helps and is nearly free → ship richer AU text + event timestamps first** (step 1). This
+  is the recommended minimum: no new model pass, no image cost, no contract change (fields already exist;
+  raise/remove the 600-cap in `understandingSummary`, thread AU event times into `auActionTimestamps`).
+- **B adds visual JUDGMENT** but at ~5MB/request and a tiling requirement, and its *quality* edge is unproven
+  without human review → **selective multimodal planning is a candidate, NOT yet recommended** — gate on the
+  human review + a device render.
+- **C (targeted density)** only if human review says B's precise boundaries still miss.
+- The guitar final-song trim shows some errors may be **reasoning/criteria**, not evidence — so a
+  candidate/critique pass (Phase 5) stays on the table independent of visual evidence.
+
+**Production implementation sequence (proposed, NOT executed, owner-gated):** (1) richer AU text forwarding +
+event timestamps [no gate needed beyond owner go; no contract change]; (2) IF human review favors B: a
+selective, tiled, bounded contact-sheet path for the backend planner, device-gated; (3) C/critique only if a
+measured gap remains.
+
+**STOPPED at the architecture/freeze decision. No production change, no new frozen prompt, nothing pushed,
+no unrelated work. Arm C not run pending owner review.**
