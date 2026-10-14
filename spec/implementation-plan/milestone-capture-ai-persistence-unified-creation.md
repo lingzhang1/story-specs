@@ -1,6 +1,6 @@
 # Milestone — Capture: AI-Ideas Persistence + Unified Story Creation
 
-**Status:** IMPLEMENTED through Phase 6 (iOS-only), physical-device acceptance (Phase 7) owner-gated.
+**Status:** ACCEPTED — physically verified on iPhone 2026-10-14; Capture Anywhere UX milestone CLOSED.
 **Nothing pushed/deployed; local commits only.** Follows `milestone-capture-anywhere-ux-corrections.md`.
 
 ## Scope
@@ -57,3 +57,15 @@ A generate ideas · B record · C reopen same ideas (no scan) · D record again,
 ideas update · F no "Let's shoot", record always available · G–K Moments→Create Story opens setup, custom
 name/description, confirm links selected, cancel leaves no orphan · L add Moments to a Story keeps
 title/description · M generation/music/native-audio/save/share intact.
+
+## Closure (2026-10-14)
+
+Owner confirmed Capture Anywhere is complete and physically verified on iPhone across: standalone +
+Story-associated continuous capture; AI shot ideas (scan progress + proactive end) persisting across
+record/stop and reopening without re-inference; unified Add Moments (From Story Moments | From iPhone
+Photos); context-aware Moments Library; and unified Story creation routed through the existing Start-a-Story
+setup (one pipeline, no orphan, user intent preserved). Final small fixes verified: Ideas chip bottom-right,
+determinate scan progress bar + "Done scanning", clearer scanning state, Story-Home back fixed (commits
+9a75cf1, 499951c). **Milestone CLOSED.** Automated `StoryTests` (CaptureAnywherePersistenceTests +
+CaptureUXCorrectionsTests) are written to run in Xcode. Nothing pushed or deployed — all work is local
+commits awaiting the owner's push decision.

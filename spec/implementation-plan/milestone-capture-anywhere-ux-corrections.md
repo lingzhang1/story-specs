@@ -1,6 +1,6 @@
 # Milestone — Capture Anywhere: UX Corrections & Unified Add Moments
 
-**Status:** IMPLEMENTED through Phase 5 (iOS-only), physical-device acceptance (Phase 6) owner-gated.
+**Status:** ACCEPTED — physically verified on iPhone 2026-10-14; milestone CLOSED.
 **Nothing pushed/deployed; local commits only.** Builds on the Capture Anywhere V0.2.2 implementation
 (`milestone-capture-anywhere-v0.2.2.md`).
 
