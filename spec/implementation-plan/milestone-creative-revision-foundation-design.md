@@ -44,20 +44,29 @@ breadth/pace lever today is the structured `editorial_mode` enum (highlights|ful
 
 ## 2. Root cause of low version diversity
 
-The plan is a pure, deterministic function of unchanged inputs. Three contributing causes, in priority order:
+The PRIMARY, established gap is the **absence of a version-aware planning input and an explicit
+alternative-edit objective**: the planner is given identical inputs and no instruction to differ, so it has
+no reason to produce a different edit. Two secondary contributors:
 
-1. **No version-aware input.** `EditPlanInputs` has no field describing what the prior version did. Identical
-   inputs → identical reasoning.
-2. **`temperature=0.0`** on every planner call (`RealEditPlannerEngine._call`, both the initial and repair
-   turns). Even with other inputs equal, the model is driven to the same argmax plan.
-3. **Idempotency short-circuit** on the async path: `/v1/edit-plan-jobs` computes a `payload_fingerprint(body,
-   order, critique_revision, approach, …)`; the same `operation_id` with the SAME body reuses the SAME job →
-   byte-identical cached plan. The happy path mints a fresh `operation_id` per version (cleared on completion),
-   so (1)+(2) dominate; op_id reuse only bites on the poll-timeout recovery path. A version-aware body changes
-   the fingerprint, so (3) stops masking a genuine re-plan automatically.
+1. **`temperature=0.0`.** This strongly biases the model toward the same high-probability plan, but model
+   output is NOT guaranteed byte-identical — temperature-zero is a strong determinism bias, not a hard
+   guarantee. We do NOT rely on, or change, temperature in this increment; the version-aware input is the lever.
+2. **Idempotency is correct and must be preserved — it is not a bug to work around.** The async job key
+   (`operation_id` + a canonical request fingerprint) exists so that:
+   - **Transport recovery** — the SAME `operation_id` with the SAME request snapshot resumes the SAME job
+     (never a second inference);
+   - **A deliberate new version** mints a NEW `operation_id` (a genuinely different execution);
+   - **The same `operation_id` with a CHANGED payload is a CONFLICT**, not a new execution;
+   - **Polling never starts another inference.**
 
-Storytelling mode is worst because it is text-only (no contact-sheet variation) and leans hardest on the
-deterministic argmax.
+   We do NOT alter the fingerprint to "bypass" idempotency. Instead, a deliberate alternative version is a
+   first-class new execution (new `operation_id`), and the version-aware `revision_context` is part of the
+   request snapshot that the canonical fingerprint already covers — so an identical re-submission still
+   resumes, and a genuine new-version request is genuinely new. The old framing ("change the fingerprint so a
+   re-plan happens") is WRONG and is removed.
+
+Storytelling mode shows the effect most because it is text-only (no contact-sheet variation to perturb the
+inputs), so without a version-aware objective it leans hardest on the same argmax plan.
 
 ## 3. Shared architecture recommendation
 
@@ -70,19 +79,38 @@ entry point is reachable (today it only runs inside `generate()`).
 
 Minimum additive request fields (all optional, default none ⇒ today's behavior byte-for-byte):
 ```
-revision_context (optional object, USER-message only):
-  mode:            "explore" | "revise"            # drives preservation semantics (§ Phase 3)
-  prior_plans:     [compact digest]                # for diversity / preservation (client-derived)
-  directives:      { include_moment_ids: [...],    # HARD — validated deterministically
-                     exclude_moment_ids: [...],
-                     opening_moment_id: id|null,
-                     ending_moment_id:  id|null,
-                     order_pins: [ [id,id], ... ],  # relative order constraints
-                     preserve_continuous: [moment_id,...] }
-  soft_direction:  str|null                        # SOFT — "more cinematic", "faster", opening/ending vibe
+revision_context (optional object, USER-message only; part of the FROZEN request snapshot at submission):
+  mode:             "explore" | "revise"
+  base_version_id:  id                              # the version the user SELECTED to work from (required
+                                                    #   when revision_context is present) — fixes lineage so
+                                                    #   constraints follow the selected chain, never a sibling
+  prior_edit_summaries: [compact digest]            # EXPLORE: bounded summaries of the selected parent + a
+                                                    #   bounded set of relevant recent versions (NOT full plans)
+  base_plan:        EditPlan/2 object | ref         # REVISE: the EXACT executable plan of base_version_id, or
+                                                    #   an immutable reference the worker reliably resolves —
+                                                    #   NEVER a digest substitute (digests are explore-only)
+  directives:       { include_moment_ids: [...],    # HARD — validated deterministically (NL V1)
+                      exclude_moment_ids: [...],
+                      opening_moment_id: id|null,
+                      ending_moment_id:  id|null,
+                      order_pins: [ [id,id], ... ],
+                      preserve_continuous: [moment_id,...] }
+  soft_direction:   str|null                        # SOFT — "more cinematic", "faster" (NL V1)
 ```
-Nothing here changes the EditPlan/2 OUTPUT contract. `revision_context` is request-only, bumping the
-request/DTO minor; the output stays frozen EditPlan/2.
+
+Contract rules (amendment §2):
+- **base_version_id is explicit.** When `revision_context` is present it names the user-selected version;
+  Explore carries bounded `prior_edit_summaries` (selected parent + a bounded relevant-recent set), Revise
+  carries the EXACT `base_plan` for `base_version_id` (or an immutable ref the worker resolves) — a digest is
+  never a substitute for the exact base plan in Revise.
+- **The request snapshot is FROZEN at submission** and `revision_context` is included in the CANONICAL async
+  request fingerprint (`payload_fingerprint`). So an identical re-submission under the same `operation_id`
+  still resumes the same job (transport recovery), and a changed `revision_context` under the same
+  `operation_id` is a CONFLICT — we never mutate the fingerprint to force a re-plan.
+- **The context is carried end to end:** DTO validation → job staging → worker loading → planning → critique →
+  repair → final validation. Each stage that re-sends the request re-sends `revision_context`.
+- The frozen `edit_plan/5.2` SYSTEM body and the EditPlan/2 OUTPUT contract are unchanged; `revision_context`
+  is request-only and injected into the USER message. When absent, behavior is byte-for-byte today's.
 
 Why not a separate revision engine: the engine already plans, critiques, revises and validates against the same
 schema. A second engine would duplicate the validator and the Media-Engine contract. The required behavior is a
@@ -118,24 +146,27 @@ existing components cannot support it") is NOT met.
 Reuse the `critique → revise → validate` backbone, seeded with the EXISTING committed plan (`base_plan` from the
 source version's `editPlanJSON`) plus the parsed directive. Two directive classes, separated explicitly:
 
-- **HARD constraints** → a STRUCTURED `directives` object parsed from the user's NL, enforced by NEW
-  deterministic `validate_plan` predicates: required moment present; forbidden moment absent; opening/ending
-  `asset_id` pinned; relative order respected; a `preserve_continuous` span kept as one unbroken segment. A
-  revision that violates a hard predicate is REJECTED → one bounded repair → honest failure; it is NEVER
-  silently ignored. Covers: must-include a Moment, exclude a Moment, change opening, change ending, reorder
-  specified Moments, preserve a continuous performance.
-- **SOFT preferences** → carried as text in the revise call (same seam as `soft_direction`): "more cinematic",
-  "faster/slower pacing", "increase/decrease coverage" (nudges `editorial_mode` + text), opening/ending *vibe*.
-  Gated only by `validate_plan` (no hard predicate). Nearly free — mostly wiring.
-- **Source-reference resolution.** Map a user phrase ("the summit shot", "where she spins") to a Moment id using
-  EXISTING AU evidence (moment summaries, `useful_segments`, events) and, when visual-first is on, the
-  multimodal contact sheets. Deterministic candidate ranking; the model proposes, the resolver confirms against
-  real Moment ids (never invents footage).
-- **Ambiguous references → thumbnail clarification UX.** When resolution is low-confidence or multiple Moments
-  match, present a small thumbnail picker ("which one did you mean?") rather than guessing. Uses the existing
-  `MomentThumbnailCache`; no new media pipeline.
-- **Infeasible / conflicting directives are surfaced**, never dropped: e.g. "exclude the only Moment that can
-  open" or "include X and exclude X" → an honest, specific message; the user adjusts.
+- **Reference TARGETS are typed and distinct** (an id matching is not proof of correct semantic resolution):
+  (a) a **Moment**; (b) an **event / source range inside a Moment**; (c) a **particular segment occurrence** in
+  the base edit (the same Moment can appear in multiple segments). The resolver must say WHICH it resolved.
+- **Source-reference resolution** maps a user phrase to one of those targets using EXISTING AU evidence (moment
+  summaries, `useful_segments`, events) and, when visual-first is on, the multimodal contact sheets. Resolution
+  is scoped to the CURRENT Story's eligible Moments — INCLUDING omitted/unused footage — and never auto-inserts
+  unrelated global-library media. Deterministic candidate ranking; the model proposes, the resolver confirms
+  against real ids.
+- **Ambiguous references → thumbnail clarification UX** (existing `MomentThumbnailCache`), producing a TYPED
+  clarification outcome BEFORE rendering. An unresolved reference must NOT silently become a guessed hard
+  directive — it is either resolved by the user or reported as unresolvable.
+- **Explicit include-all semantics:** "include everything / all of them" = all eligible Moments in a FIXED
+  selected source set, as suitable EXCERPTS (not every source second). A duration conflict (more material than
+  the target allows) is EXPLAINED, not silently resolved by dropping clips.
+- **Infeasible / conflicting directives are surfaced**, never dropped (e.g. "exclude the only Moment that can
+  open", or "include X and exclude X").
+- MVP keeps the current continuous-performance + native-audio safeguards; automatic discovery of precise
+  musical/action boundaries is DEFERRED.
+
+> This NL section is **design completion only** during the Explore increment — it is not implemented until the
+> Create Another Version device gate passes (owner direction §4/§5).
 
 ## 6. Preservation semantics (Explore vs Revise)
 
@@ -149,10 +180,23 @@ Two distinct operations, both append-only (each creates a NEW GeneratedOutput; p
 | Temperature | baseline 0.0, optional bounded bump | 0.0 (determinism is desirable for a targeted edit) |
 | Directives | none required | hard + soft directives applied + validated |
 
-**User-owned invariants that survive BOTH operations** (never silently replaced): CreativeIntent target
-duration; sound preference; editing approach; any HARD directive the user has stated; the user-authored Story
-title/description. AI-generated recommendations (StoryGuide, shot suggestions, the plan itself) MAY change as
-evidence changes — the distinction mirrors the Capture-Anywhere Phase-4 user-intent rule already in the codebase.
+**User-owned invariants preserved by DEFAULT in BOTH operations** (never silently replaced): user intent +
+CreativeIntent target duration; editing approach; sound preference; the selected soundtrack; active INHERITED
+hard directives; user-authored Story title + description; existing protected continuous passages. The user MAY
+explicitly change a preference or directive — a conflict between an explicit new instruction and an inherited
+one is RESOLVED and surfaced, never silently dropped on either side.
+
+**Constraints follow the SELECTED version's lineage.** Inherited directives/protected passages come from
+`base_version_id`'s chain only — never accidentally from an unrelated sibling version. **Change Music stays the
+existing soundtrack-only operation** (`operationType="change_music"`), distinct from Explore/Revise.
+
+**Revise is a DIFF against the exact base plan.** Allowed changes = what the directive/soft_direction asks for.
+After a Revise, compare the result to the exact `base_plan` and DETECT unrelated changes to source ranges,
+ordering, speed, crop, transition, music, and native-audio on segments the directive did not target — these are
+regressions to flag/reject, not silent edits. A NECESSARY timeline shift (e.g. re-numbered `order` after an
+insert/removal) is NOT by itself a change to the underlying shots and is allowed. **A directed revision that
+produced no effective change must NOT be returned as a successful edit** — it is an honest "couldn't apply that"
+rather than a saved near-identical version.
 
 ## 7. Contract and prompt implications
 
