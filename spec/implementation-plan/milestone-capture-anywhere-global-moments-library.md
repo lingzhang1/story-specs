@@ -83,3 +83,48 @@ MomentUnderstandingModel  — UNCHANGED (already global, keyed by momentId)
 6. Close/reopen app → all Moments + associations persist.
 7. AU + rendering complete with NO regression vs today.
 8. Migration: existing Story+GeneratedOutput+Moment records survive the upgrade; each old Story-scoped Moment becomes a global Moment linked to that Story; media + outputs preserved.
+
+---
+
+## ADDENDUM (2026-10-13) — Phase 1 corrected persistence design (owner-approved architecture, migration corrections)
+
+Owner approved the product architecture and required a corrected, recoverable migration (no silent store recreation; preserve the existing store; smallest demonstrably safe design). Decisions, grounded in: iOS target **18.5** (full `VersionedSchema`/`SchemaMigrationPlan` available), **no migration plan exists today**, **~36 read sites use `story.moments`** (the inverse — stays a `[MomentModel]` under either design, so reads do NOT break), and the current destructive `catch` in `StoryApp.swift` that deletes `.store/-shm/-wal` on migration failure.
+
+### Selected design: explicit `StoryMomentLink` association model (NOT direct many-to-many)
+```
+MomentModel  (independent; owns its media)
+  • asset: AssetModel?            (KEEP .cascade — deleting a MOMENT deletes its own media)
+  • links: [StoryMomentLink]      (.cascade, inverse StoryMomentLink.moment — deleting a Moment removes its links, never a Story)
+StoryModel
+  • links: [StoryMomentLink]      (.cascade, inverse StoryMomentLink.story — deleting a Story removes its LINKS, never Moments/media)
+  • generatedOutputs              (KEEP .cascade — Story-owned renders)
+StoryMomentLink  (NEW join entity)
+  • id, story: StoryModel?, moment: MomentModel?, addedAt: Date, orderIndex: Int?
+MomentUnderstandingModel          (UNCHANGED — already global, keyed by unique momentId)
+```
+**Rationale vs direct many-to-many:** (a) a link row carries per-association data (order within a Story, added-at) without a future migration; (b) link rows are COUNTABLE/inspectable — directly serves the "verify relationship counts" acceptance requirement, where SwiftData's implicit join table is opaque; (c) delete semantics are unambiguous — a Moment is NEVER on a Story's delete path, so acceptance test 4 (delete Story, shared media survives) holds by construction.
+
+### 1.3 — additive bridge CANNOT coexist with the legacy cascade (verified reasoning)
+The legacy `StoryModel.moments` is `deleteRule: .cascade`. Keeping it live during a bridge means a Story delete still cascade-deletes Moments — the exact bug we are removing. **Therefore the delete-rule change must happen IN the migration; this is not a safe additive-only coexistence.** The old `MomentModel.story` to-one is retped as a NULLABLE shadow for backfill verification only, with its cascade neutralized by moving ownership to `StoryMomentLink`.
+
+### Migration strategy (recoverable, idempotent, non-destructive)
+- Use an explicit **`SchemaMigrationPlan`** with a V1→V2 stage (iOS 18.5 supports it). V1 = current schema; V2 adds `StoryMomentLink`, changes Story↔Moment ownership to the link + `.nullify`/link-cascade.
+- **Custom migration stage backfills**: for every V1 Moment with a non-nil `story`, create one `StoryMomentLink(story:moment:addedAt:moment.createdAt)`. Idempotent: skip if a link for that (story,moment) already exists.
+- **Non-destructive guarantee**: REMOVE the recreate-store `catch` in `StoryApp.swift`. On migration failure, DO NOT delete the store — surface a recoverable error (keep the old store intact so a fixed build can retry). Never auto-destroy user data.
+- **Verification pass** after migration (logged, non-fatal): count Stories/Moments/Outputs/links; assert every pre-migration Moment still exists; assert each Moment's `asset.relativePath` file exists on disk; assert link count == pre-migration (Story,Moment) pairs.
+- **Test fixture**: a populated V1 store (Stories + Moments + AU + GeneratedOutputs + media files) migrated in a test to prove counts/paths preserved before the device gate.
+
+### Media ownership — captured vs imported
+- **Captured** (camera): the app wrote the file under `Documents/media/` → the Moment OWNS it → `MomentModel.asset` `.cascade` (deleting the Moment deletes the file).
+- **Imported** (existing-media): same ownership model once copied into `Documents/media/` (the app already copies on import, so lifetime is identical). If a future import references a Photos asset WITHOUT copying, that Moment's asset is `external` and library deletion must NOT delete the user's original — tracked as a sourceRaw distinction, out of MVP scope unless import copies change.
+
+### Safe library removal vs destructive deletion
+- **Remove from a Story** = delete the `StoryMomentLink` only (Moment + media + AU untouched).
+- **Delete from library** (explicit) = delete the Moment → cascade its `asset` file + its `MomentUnderstanding`, and cascade-remove its links from all Stories; WARN if it is still linked to any Story first.
+- A Story delete = cascade its links + its `generatedOutputs`; Moments/media/AU survive.
+
+### Preserve GeneratedOutputs + version lineage
+`GeneratedOutputModel` is UNCHANGED (still Story-owned `.cascade`; `versionId/parentVersionId/operationType/editPlanJSON` intact). Migration does not touch it.
+
+### Smallest demonstrably safe path
+Link-model + explicit SchemaMigrationPlan + non-destructive failure + populated-fixture test + device gate. This is larger than a lightweight migration but is the smallest design that satisfies "never delete user data to recover" and "verify counts + file existence." STOP at the Phase 3 device migration gate before any Home/Library UX.
