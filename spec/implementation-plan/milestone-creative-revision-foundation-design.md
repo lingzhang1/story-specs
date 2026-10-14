@@ -257,3 +257,35 @@ Each ships and is validated separately; (2) and (3) both depend only on (1).
   `milestone-async-edit-planning-and-prod-rollout.md` (async foundation), `12-edit-flow.md` /
   `milestone-v2a/v2b-creative-editing-*.md` (deterministic cut refinement, distinct from NL directives).
 - **STOP at owner architecture/freeze gate.** No implementation, no contract/prompt change, nothing pushed.
+
+---
+
+## Implementation — Shared Foundation + Create Another Version (Explore) [committed, device-acceptance pending]
+
+Approved amendments applied (commit 864e925 in specs). Implemented (app commit 576ab2b, NOT pushed):
+
+**Backend** — additive `revision_context` on `EditPlanRequest` (`extra="forbid"`-safe) + `EditPlanInputs`;
+injected into the USER message ONLY via `_revision_context_block` (frozen `edit_plan/5.2` system body + EditPlan/2
+output unchanged); threaded through BOTH sync endpoints and the async worker's request reconstruction. Because it
+lives inside the request `body`, it is part of the frozen request snapshot AND the canonical
+`payload_fingerprint` (body-hashed) with NO fingerprint-logic change — so same-op/same-body resumes, same-op/
+changed-context is a 409 conflict, new version = new op_id. `diversity_diagnostics` helper added. Temperature
+left at 0.0 (unchanged). 70 backend tests green (+8 new).
+
+**iOS** — `EditPlanRequestDTO.revisionContext` (encoded `revision_context`, omitted when nil = byte-identical
+request); `EditPlanRequestBuilder.build(revisionContext:)` passthrough; new pure `RevisionContextBuilder`
+(Explore context from the user-selected parent's persisted `editPlanJSON` + a bounded ≤4 recent set; diversity
+diagnostics). `StoryCreationCoordinator.createAnotherVersion(for:from:)` mints a fresh op_id, sets
+`operationType="another_version"` + `parentVersionId`, re-plans Explore, computes `lastDiversity`, and persists
+append-only. Wired through `StoryResultView` ("Create a new version" now carries its output as the Explore
+parent) → `CreateStoryPreviewView` → `StoryCreatingView(sourceVersion:)`. Works for Storytelling AND Visual-first
+(approach is not switched to fake difference). `RevisionContextBuilderTests` added (parse-clean; device Xcode is
+the authoritative compile gate).
+
+**Automated checks (owner §6):** absent-context unchanged ✓; context injected + carried ✓; same-op retry resumes
+/ changed payload 409 / new op new job ✓ (existing job-API tests + new fingerprint test); selected parent incl.
+older version ✓; bounded history ✓; near-identical flagged (not silently saved) ✓.
+
+**STOP — awaiting bounded device acceptance** on Girl with Dress / Hiking / Guitar / Minimal footage (purposeful
+alternative vs no forced/fabricated variation; near-identical explained, never saved as a creative alternative).
+Natural-Language Revision V1 follows after this device gate. Nothing pushed.
