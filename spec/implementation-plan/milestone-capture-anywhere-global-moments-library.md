@@ -128,3 +128,16 @@ The legacy `StoryModel.moments` is `deleteRule: .cascade`. Keeping it live durin
 
 ### Smallest demonstrably safe path
 Link-model + explicit SchemaMigrationPlan + non-destructive failure + populated-fixture test + device gate. This is larger than a lightweight migration but is the smallest design that satisfies "never delete user data to recover" and "verify counts + file existence." STOP at the Phase 3 device migration gate before any Home/Library UX.
+
+---
+
+## ADDENDUM (2026-10-13) — Phase 1-3 implemented + a separated test-debt finding
+
+**Global Moments schema is implemented and PROVEN correct on device.** A temporary diagnostic in test_happyPath confirmed in the owner's Xcode run: `story.moments.count == 2`, resolvable media == 2, AU fetch == 2 — i.e. the StoryMomentLink model, the computed `story.moments` accessor, and `StoryModel.attach(_:)` all resolve correctly. `GlobalMomentsPersistenceTests` (10 tests) cover standalone create, reuse across Stories, Story-delete-preserves-Moment+media, remove-from-one-Story, library delete, dup prevention, ordering, AU survival, output ownership.
+
+Commits (app repo, NOT pushed): d2b178f (non-destructive migration failure), 77c4ab3 (schema + tests), 6a6578a / 8cdc992 / 9f981de / a4ef968 (compile fixes, incl. pre-existing stale tests), b49ee46 (attach() in-memory inverse), 2b2b58e (EditPlanJobClienting protocol + FakeJobClient + StoryCreationCoordinatorTests rewired).
+
+**SEPARATED DEBT — async-rewrite test retrofit (NOT a global-Moments bug):** the earlier async-planning rewrite (c57e6d8, committed "device-acceptance pending") moved planning from the sync planner onto the network EditPlanJobClient but did not update the unit tests. Result: coordinator-driven tests injected a FakePlanner that is no longer on the path, so they stalled in .planning. Fixed in StoryCreationCoordinatorTests (via the new protocol + FakeJobClient). STILL TODO as separate async-rewrite debt:
+- `StoryCreationFailureTests` — mechanical: inject FakeJobClient into ~8 constructions + the stateful retry case.
+- `StoryDurationFeasibilityTests` — NOT mechanical: its premise ("count planner calls / inspect the target the planner received") is obsolete under async; the call-count + target assertions must move from the planner to the FakeJobClient (submitCount / lastRequest).
+Owner decision 2026-10-13: STOP the test retrofit here, proceed to Phase 4 Capture + Library UX, track the above as separate debt.
