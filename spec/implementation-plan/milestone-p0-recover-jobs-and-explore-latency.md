@@ -45,18 +45,26 @@ Written BEFORE submit-dependent work and kept in sync at every pipeline transiti
 
 ## 3. Recovery behavior (Phases 2–3)
 
+Applies to ALL THREE generation operations — `original`, `another_version`, and `revision` (the mandate's
+`edit_ai`; the live coordinator value is `"revision"`, the same operation). One shared lifecycle + one
+recovery coordinator, keyed on the persisted `operationType`, not hardcoded to Explore.
+
 `PendingOperationRecovery` (`apps/ios/Story/Story/Domain/Creation/PendingOperationRecovery.swift`) runs ONE
 pass on `StoryApp` init (relaunch) and on `scenePhase == .active` (foreground) — mirroring the existing
 `AssetUnderstandingQueue.recoverOrphans + drain`. It finds recoverable rows and resumes each via
 `StoryCreationCoordinator.resumePendingOperation`:
 
-- queued/running → resume polling the existing job (reuses `jobId` — no re-submit), then validate + render +
-  persist.
+- queued/running → resume polling the existing job (reuses `jobId` — **no re-submit**; the submitted request,
+  incl. any revision directives, already lives in the server-side job), then validate + render + persist.
 - plan_ready / completed-with-saved-plan → `renderResumedPlan` renders DIRECTLY from the saved plan (no poll,
-  no inference).
+  no inference) for every operation type; `operationType` + `parentVersionId` are carried onto the output.
 - failed → the row is kept with its `failureCategory`; reopen surfaces the failure honestly.
-- Music is re-resolved per op from `musicSelectionRef` (My Music locally; provider track re-downloaded +
-  analysed, same path as Revise/Change Music); nil renders no-music rather than block recovery.
+- Music is re-resolved per op from `musicSelectionRef` **WITHOUT a fresh MusicPlan**: the plan was already
+  planned music-aware, so recovery only needs the soundtrack file + decoded analysis (track-scoped
+  `analysisBoth` + `downloadSoundtrack`, no `recommend()`) plus the persisted `soundtrackRole` /
+  `nativeAudioPriority`. My Music resolves locally; nil renders no-music rather than block. This is what keeps
+  `original` recovery from unnecessarily rerunning AU/Guide/Coverage (read from SwiftData, never re-invoked in
+  `run()`) OR MusicPlan.
 
 Explicitly NOT an indefinite background loop and NOT reliant on background `URLSession`/`beginBackgroundTask`:
 active polling stops when the app is suspended and a fresh pass resumes it on the next `.active`.
@@ -115,10 +123,12 @@ Explore (model calls, latency, editorial quality).
 
 ## 9. Remaining risks
 
-- Cold-relaunch render-resume re-resolves a provider soundtrack over the network; if that fails the resume
-  renders no-music (video still recovered) — honest degradation, surfaced via beacon.
-- A revise (`operationType=revision`) that is interrupted BEFORE plan_ready cannot reconstruct its exact
-  base-plan directives on a cold relaunch; recovery renders the already-planned result when one exists, else
-  the user re-issues the revise. Original + Explore recover fully.
+- Cold-relaunch render-resume re-resolves a provider soundtrack over the network (track-scoped analysis +
+  download, NO MusicPlan); if that fails the resume renders no-music (video still recovered) — honest
+  degradation, surfaced via beacon.
+- A queued/running resume re-reads persisted AU/Guide from SwiftData to rebuild the request, but when
+  `story.planJobId` is set that rebuilt request is NOT submitted — only the existing job is polled — so the
+  revision directives baked into the server-side job are preserved and no inference repeats. The deterministic
+  feasibility preflight re-runs (cheap, no model call).
 - `swiftc -parse` clean on all touched files; the SwiftData `@Model` macro is sandbox-blocked, so the device
   Xcode build is the authoritative compile gate (owner acceptance).
