@@ -429,3 +429,18 @@ iterations; Increment 2 was accepted first pass.
    decision (see Phase 5.8).
 2. Capture-time still→video conversion — **deferred**.
 3. Camera-metadata audit (capture timestamp, optional GPS, orientation) — **follow-up**, not started.
+
+---
+
+## Addendum — thumb-drag zoom dial (commit `859d7d8`, 2026-10-18, device-accepted)
+
+Owner-requested UX addition on top of Package B, matching the native camera's drag-to-fine-tune zoom.
+Dragging on the zoom strip (either axis) expands the compact chip row into a **tick-ruler dial** with a
+gold live `N.N×` readout, mapping thumb travel to a **log-scaled continuous zoom** (finer at the low
+end, like the native dial); release collapses back to the chips. A plain tap still snaps to a preset
+(`highPriorityGesture` lets a drag win over the chip buttons while a no-movement tap falls through).
+
+Reuses the existing `setUserZoom` + `.zoomChanged` plumbing; added `userZoomRange` (controller + model)
+and pure `CameraZoomFormat.dialZoom`/`dialFraction` with 4 unit tests (round-trip, clamp, log midpoint).
+Two follow-up commits in this feature: `ffe9038` (initial dial), `859d7d8` (gesture-priority fix so the
+drag registers over the chip buttons). Device-accepted. No engine/persistence/contract change.
