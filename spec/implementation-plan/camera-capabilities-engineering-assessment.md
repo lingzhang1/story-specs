@@ -247,3 +247,94 @@ STOP after the assessment. No camera features implemented, no engine rewrite, no
 modified, no persistence contracts changed, nothing pushed or deployed. The owner chooses Package A, B,
 or C after reviewing these estimates; the chosen package becomes the default scope and its results will
 be written back to this doc (and a per-phase completion/eval report) once implementation runs.
+
+---
+
+## Owner decision (2026-10-18)
+
+Owner approved a **modified Package B, delivered in two device-gated increments**. Native photo
+capture, capture-time still→video conversion, and professional controls are **explicitly deferred**.
+A camera-metadata audit (capture timestamp, optional GPS, orientation) is preserved as a separate
+follow-up.
+
+- **Increment 1 (implement now):** pinch-to-zoom (preview + recording), device-supported zoom
+  presets (no fake optical lenses), tap-to-focus/expose, torch where supported, orientation
+  verify/fix — all reusing `ContinuousCameraController`, preserving continuous recording, AI scanning,
+  persistence, and interruption handling. Stop after Increment 1 for owner device acceptance.
+- **Increment 2 (after acceptance):** front/rear switching between recordings, full device-supported
+  zoom/lens controls, exposure adjustment + AE/AF lock, orientation hardening + regression tests.
+
+---
+
+## Implementation Results — Increment 1 (commit `572ec2d`, 2026-10-18)
+
+**Status:** code-complete, parse-clean, committed. iOS-only; additive on `ContinuousCameraController`
+(no new engine, no session-topology change, no persistence/contract change). **Awaiting owner device
+acceptance** — the acceptance checks below are NOT yet run on hardware.
+
+### What shipped (all ADDITIVE on the existing engine)
+
+| Increment-1 feature | How it was delivered |
+|---|---|
+| Pinch-to-zoom (preview + recording) | `applyPinchZoom(scale:base:)` on `videoZoomFactor`, clamped to the device min/max. Gesture base captured at pinch start. Works mid-record (device-level, no topology change). |
+| Device-supported zoom presets | `zoomPresets(for:)` derived from the REAL `virtualDeviceSwitchOverVideoZoomFactors` + ultra-wide presence — 0.5× only where an ultra-wide constituent exists; a digital 2× fallback only when nothing optical reaches 2×. UI strip hidden when only [1×]. **No fabricated lens list.** |
+| Tap-to-focus + expose | `focusAndExpose(atViewPoint:)` → `captureDevicePointConverted` → focus/exposure point-of-interest, re-enabling continuous tracking after the tap (AE/AF *lock* is Increment 2). Brief focus reticle in the UI. |
+| Torch where supported | `setTorch(_:)` guarded by `hasTorch`/`isTorchModeSupported`; UI button hidden on devices without a torch. Safe mid-record. |
+| Orientation verify/fix | `AVCaptureDevice.RotationCoordinator` (iOS 17+) observing horizon-level preview + capture angles, interface-orientation fallback pre-17; applied to the preview AND movie-output connections; **never re-rotates mid-recording** (a clip keeps its start angle). Closes the audit's confirmed latent gap (nothing set connection orientation before). |
+
+**Safety preserved:** every device mutation runs on a dedicated `sessionQueue` inside
+`lockForConfiguration`/`unlockForConfiguration`, so it is atomic and cannot interleave with the
+recording state machine (which lives on main). No `begin/commitConfiguration`, no input/output change,
+so the in-flight recording and the concurrent AI-scan `AVCaptureVideoDataOutput` are untouched.
+
+### Files
+- `apps/ios/Story/Story/Media/Camera/ContinuousCameraController.swift` — device selection, zoom-preset
+  derivation, zoom/focus/torch controls, rotation coordinator (+245 lines).
+- `apps/ios/Story/Story/Features/Capture/ContinuousCaptureView.swift` — pinch+tap gesture layer, zoom
+  preset strip, torch button, focus reticle (+135).
+- `apps/ios/Story/Story/Features/Capture/ContinuousCaptureModel.swift` — control passthroughs + the
+  pure `CameraZoomFormat` label helper (+43).
+- `apps/ios/Story/StoryTests/CameraControlsTests.swift` — zoom-label formatter tests (new).
+
+### Automated tests
+`CameraControlsTests` covers the pure, device-independent zoom-label formatting (`.5` / `1` / `2`),
+including the display contract that an SE-style [1×,2×] list never renders a `.5`. The device-dependent
+pieces (preset DERIVATION from real switch-over factors, focus/exposure application, torch, rotation)
+require an `AVCaptureDevice` and are verified in **physical-device acceptance**, not unit tests.
+Verified pure-logic output by standalone compile (all pass). Parse-clean via `swiftc -parse`; Xcode
+device build remains the authoritative type-check gate.
+
+### Actual engineering time (measured, this session)
+≈ **1.5 engineering hours** of implementation for all five Increment-1 features + tests + doc. This is
+**well under** the Package-A estimate (~14h impl + 5h test) — because the audit's hardest de-risking was
+already proven (the dual-output coexistence) and every control turned out to be a clean additive device
+mutation with no session rebuild. **This measured figure is implementation only; it does NOT include
+physical-device acceptance/debugging time**, which the estimate bundled in and which is still pending —
+device testing is where estimates for camera work realistically land, and any orientation/zoom-preset
+defects found on hardware will add to this.
+
+### Increment 2 — re-estimate (shared infra NOT double-counted)
+
+Increment 1 already built the shared substrate the original estimate counted once: the
+`sessionQueue` + `lockForConfiguration` device-config helper, device-capability detection
+(`DiscoverySession`, `hasTorch`, preset derivation), the gesture layer, the zoom/preset UI, and the
+orientation plumbing. Those ~14–16h of shared work are **done**, so Increment 2 should NOT re-pay them.
+
+| Increment-2 feature | Remaining impl | Remaining test | Notes |
+|---|---|---|---|
+| Front/rear switch (between recordings) | 3h | 3h | Input swap in `begin/commitConfiguration`, gated out of `.recording`; re-bind audio + re-apply focus/exposure/orientation/zoom after swap (reuses existing helpers). |
+| Full device zoom/lens controls | 2h | 2h | Discrete optical lens buttons layered on the preset strip already built; mostly UI + per-device matrix testing. |
+| Exposure adjustment + AE/AF lock | 3h | 3h | `setExposureTargetBias`, `exposureMode=.locked`/`focusMode=.locked` via the existing `configureDevice` helper. |
+| Orientation hardening + regression tests | 3h | 3h | Edge cases (upside-down, mid-rotation record start, front mirroring), plus regression tests around the recording guards. |
+| **Increment 2 total** | **≈ 11h** | **≈ 11h** | **≈ 22h (~3 engineer-days)** incl. device testing. |
+
+Down from a naive sum because the shared camera infrastructure is already in place. The dominant
+remaining cost is **physical-device testing across the SE→Pro matrix**, not new engine code.
+
+### Still pending (Increment 1 close-out)
+1. **Owner device acceptance** — rebuild on iPhone and verify: pinch zooms smoothly (incl. during
+   recording); presets snap and show only device-available options; tap sets focus+exposure with a
+   reticle; torch toggles only where present; **portrait and landscape clips record upright** in the
+   final Story; AI scan + persistence unaffected after every control action. **STOP here.**
+2. Deferred (owner): native photo capture + pipeline, still→video conversion, pro controls.
+3. Separate follow-up: camera-metadata audit (capture timestamp, optional GPS, orientation).
