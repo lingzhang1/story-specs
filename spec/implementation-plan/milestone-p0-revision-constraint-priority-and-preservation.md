@@ -150,9 +150,24 @@ performances are not shortened below a floor.
 
 - **Protected continuous performances & highlight-aware trim** — no schema signal today (see point 6);
   bounded snap-to-useful-segment + protected-duration floor deferred.
-- **Phase 5 unsupported-operation handling** (color correction, photo adjustments, unsupported speed
-  effects, reframing): explain the limitation, preserve the version, never fabricate/substitute — NOT
-  yet built; separate increment per owner's "do not implement every repair this increment."
+## Phase 5 — unsupported-operation handling (commit `5e4fa34`, deployed)
+
+**Audit:** an unsupported revise ("make it warmer", "add a glow", "reframe to square") has no hard
+directive and no clip-length target, so it fell through to the model, which returns SOME re-cut plan —
+a SILENT SUBSTITUTION of a different edit for the one asked for. MediaEngineV1's own scope (header
+comment): trim, order, output duration, aspect-fit, cut, crossfade/fade, 0.5-2.0x speed — NO color,
+filters, brightness/contrast/saturation, glow/vignette/blur, zoom/crop/reframe, stabilization,
+text/overlay or background replacement.
+
+**Smallest guard:** `_classify_unsupported_ops()` scores a revise's `soft_direction` against the renderer
+capability vocabulary BEFORE any planning. `all_unsupported` -> keep the selected version and raise a
+clear limitation (new `failure_category = unsupported_operation`, `model_calls = 0`, "your current
+version was kept unchanged"); `mixed` (a supported edit + an unsupported effect) -> record
+`partial_support_note` naming what cannot be applied and run the supported part; `supported`/empty ->
+unchanged. Word-boundary, case-insensitive; no false positives on shorten/reorder/music/faster-cuts/
+"more cinematic"; bare object nouns ("stabilize the clip") do not flip to mixed. Initial creation is
+never gated. Worker maps it to its own `failure_category`; iOS `EditPlanJobFailure.unsupportedOperation`
++ an honest message (no fabricated success, no substitute video). +3 tests (118 pass).
 - Richer bounded preservation-safe repairs (localized feasibility correction beyond relax-and-
   revalidate) deferred.
 - The transition-vocabulary drift (backend {cut,crossfade,fade_in,fade_out,dip_to_black} vs iOS
