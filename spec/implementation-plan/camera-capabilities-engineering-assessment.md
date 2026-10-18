@@ -338,3 +338,63 @@ remaining cost is **physical-device testing across the SE→Pro matrix**, not ne
    final Story; AI scan + persistence unaffected after every control action. **STOP here.**
 2. Deferred (owner): native photo capture + pipeline, still→video conversion, pro controls.
 3. Separate follow-up: camera-metadata audit (capture timestamp, optional GPS, orientation).
+
+---
+
+## Implementation Results — Increment 2 (commit `53630aa`, 2026-10-18)
+
+**Status:** code-complete, parse-clean, committed. iOS-only; additive on `ContinuousCameraController`
+(no new engine, no session rebuild beyond the input swap, no persistence/contract change). **Awaiting
+owner device acceptance.**
+
+Increment 1 was accepted on device (zoom ladder `.5 1 2 3 4 5`, tap focus/expose, torch, orientation,
+live zoom strip) after three follow-up fixes in that increment: gradual zoom ladder (`2f0401d`), focus
+reticle coordinate-space (`f67f172`), and strip default-visibility + live magnification tracking
+(`1be4a4a`).
+
+### What shipped
+
+| Increment-2 feature | How it was delivered |
+|---|---|
+| Front/rear switch (between recordings) | `switchCamera()` rebuilds ONLY the video input inside `begin/commitConfiguration` — audio input and movie/data outputs stay. Re-derives zoom presets for the new device, resets zoom to 1×, re-applies orientation, clears torch + AE/AF lock. **Refused while recording** (UI gates the button out of `.recording` AND the controller guards `phase`). Flip button hidden when `hasFrontCamera` is false. |
+| Exposure adjustment | `setExposureBias(ev)` → `setExposureTargetBias`, clamped to the device's REAL `minExposureTargetBias…maxExposureTargetBias`. A vertical "sun" slider appears beside the focus reticle (drag up = brighter, down = darker); hidden when the device reports a zero bias range. |
+| AE/AF lock | `setAEAFLock` sets `exposureMode`/`focusMode = .locked` (and back to continuous); a **tap-to-focus clears the lock** (native behavior). Top-bar lock toggle reflects state. |
+| Orientation hardening | After a front/rear swap the `RotationCoordinator` is **rebuilt for the new device** (the old one reports the wrong device's angles). Version-agnostic `applyRotationForCurrentAPI()`; still never re-rotates the movie connection mid-recording. |
+| Full device lens controls | Satisfied by the Increment-1 preset strip: it already exposes every optical lens through the real `virtualDeviceSwitchOverVideoZoomFactors` ladder with live pinch tracking. For a single virtual multi-camera device that IS the full lens control — there is no separate "lens device" to switch to, so no redundant UI was added (honest scope note, not a cut). |
+
+**Safety preserved (Phase 5 risks revisited):** the only session-topology change is the input swap,
+which is gated out of recording and reverts to the old input if the new one cannot be added (the session
+never ends up input-less). Audio input, movie output, and the AI-scan data output are untouched by the
+swap. Exposure bias / AE-AF lock / torch remain pure device-config on `sessionQueue` + `lockForConfiguration`.
+
+### Files
+- `apps/ios/Story/Story/Media/Camera/ContinuousCameraController.swift` — position-aware device picker,
+  `switchCamera`, `setExposureBias`, `setAEAFLock`, lock-aware `focusAndExpose`, coordinator rebuild, 2 new events.
+- `apps/ios/Story/Story/Features/Capture/ContinuousCaptureModel.swift` — front/exposure/lock state +
+  passthroughs, event handling, pure `exposureEV`/`exposureFraction` mapping.
+- `apps/ios/Story/Story/Features/Capture/ContinuousCaptureView.swift` — flip + AE/AF-lock top-bar
+  buttons, `ExposureSlider` sun-slider beside the reticle.
+- `apps/ios/Story/StoryTests/CameraControlsTests.swift` — exposure fraction↔EV mapping tests.
+
+### Automated tests
+Pure exposure fraction↔EV mapping: endpoint mapping, out-of-range clamp, round-trip inverse, zero-span
+safety (device-independent, standalone-verified — all pass). The device-dependent pieces (actual input
+swap, real bias clamping, lock engagement, post-swap orientation) require hardware and are
+**physical-device acceptance**. Parse-clean via `swiftc -parse`; Xcode device build is authoritative.
+
+### Actual engineering time (measured, this session)
+≈ **1.5 engineering hours** of implementation for all four Increment-2 features + tests + doc —
+**under** the ~11h re-estimate, again because the Increment-1 shared substrate (`sessionQueue` +
+`lockForConfiguration` helper, capability detection, the event/delegate plumbing, the preset strip, the
+orientation coordinator) was already in place and every Increment-2 control reused it. **This excludes
+physical-device acceptance/debugging**, which is where camera estimates realistically land and is still
+pending — expect on-device iteration on the front-camera mirroring, post-swap orientation, and the
+slider feel (as Increment 1 needed three device-driven follow-ups).
+
+### Pending (Increment 2 close-out)
+1. **Owner device acceptance** — verify: flip switches front↔rear only between recordings (disabled while
+   recording); the exposure sun-slider brightens/darkens live and is clamped; AE/AF lock holds through a
+   scene change and a tap clears it; a clip recorded after a swap is upright; AI scan + persistence
+   unaffected after every control action.
+2. Still deferred (owner): native photo capture + pipeline, still→video conversion, pro controls.
+3. Separate follow-up: camera-metadata audit (capture timestamp, optional GPS, orientation).
