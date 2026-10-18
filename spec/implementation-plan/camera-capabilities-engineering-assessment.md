@@ -1,0 +1,249 @@
+# Story — Camera Capabilities: Time-Boxed Engineering Assessment
+
+**Type:** Estimation & prioritization (NO implementation). Code-grounded audit only.
+**Date:** 2026-10-18. **Scope:** iOS camera (`apps/ios`). **Status:** 🟡 assessment complete,
+awaiting owner package choice (A / B / C). Nothing implemented, prototyped, pushed, or deployed.
+
+> Owner objective: Story's existing camera is too limited for everyday travel capture. Improve it
+> without building a professional camera app or delaying MVP. This doc estimates and prioritizes the
+> nine requested capabilities so the owner can pick a package.
+
+**Estimates vs measurements.** Every hour figure below is an engineering **estimate** from the code
+audit, not a measured result. The only **measured** facts are the audit findings (which
+controllers/outputs/models exist, and that no focus/zoom/lens/photo/torch/orientation code is present
+today). Hours assume one iOS engineer extending the existing `ContinuousCameraController`, and every
+feature includes physical-device testing (no camera in the Simulator).
+
+---
+
+## Phase 1 — Architecture audit (what actually exists)
+
+Three separate AVFoundation controllers, all built on the same pattern (`AVCaptureSession` +
+`.builtInWideAngleCamera`, back position, `.sessionPreset = .high`, `AVCaptureVideoPreviewLayer`, no
+device locking / no device configuration):
+
+| Controller | Role | Outputs | State machine |
+|---|---|---|---|
+| `Media/Camera/ContinuousCameraController.swift` | **Primary** engine (Capture Anywhere). Long-lived, records many clips. | `AVCaptureMovieFileOutput` + `AVCaptureVideoDataOutput` (AI scan, same session) | Strict `.idle→.starting→.recording→.stopping`, token-deduped delegate, interruption + backgrounding guards |
+| `Media/Camera/CameraCaptureView.swift` | One-shot recorder used by `SceneScanFlowView`'s "Let's shoot" | `AVCaptureMovieFileOutput` only | Loose `isRecording` bool, no guards |
+| `Media/Camera/SceneScanController.swift` | Frame grabber for the scan intro flow | `AVCaptureVideoDataOutput` only, no audio | scan-only |
+
+UI/model layer: `Features/Capture/ContinuousCaptureView.swift` (SwiftUI chrome + `ContinuousCameraHost`
+representable) and `Features/Capture/ContinuousCaptureModel.swift` (`@MainActor` brain: persistence,
+AI-ideas state, recording timer). `Features/SceneScan/SceneScanFlowView.swift` is the scan→recommend→
+shoot flow.
+
+**Key finding — the continuous controller is the real foundation.** It already proves the hardest
+architectural point: a **second output (`AVCaptureVideoDataOutput`) coexists on one running session
+with the movie output**, and **AI scanning runs concurrently with recording without interrupting it**
+(`startScan` never touches `movieOutput`; the scan delegate ignores buffers unless `scanning == true`).
+That de-risks "can photo + video + AI coexist" substantially.
+
+**Capabilities present internally but not exposed in UI: none.** The engine does exactly one thing
+(wide-angle back-camera video + concurrent scan). There is no hidden zoom/focus/lens/flash/photo code
+waiting to be surfaced. A grep across the entire iOS tree for `videoZoomFactor`, `focusPointOfInterest`,
+`exposurePointOfInterest`, `AVCapturePhotoOutput`, `torchMode`/`flashMode`, front `position`,
+`videoRotationAngle`/`videoOrientation`, and pinch/tap gesture recognizers returns **zero matches**.
+Every requested feature is genuinely **missing**, not partial-hidden.
+
+**Can it be extended without replacing the engine? Yes, cleanly.** The session is configured once in
+`configureSession()`; adding device config (focus/zoom/exposure/torch), gestures, and a photo output are
+all additive. The one exception requiring real care is **lens/front-rear switching**, which needs an
+input swap inside `beginConfiguration/commitConfiguration` (not a new session).
+
+**Persistence is video-only and downstream-coupled.** `MomentModel` → `AssetModel { relativePath,
+durationSeconds (NON-optional), source }` (`Data/Persistence/Models.swift`). There is **no `mediaType`
+discriminator**. Everything downstream assumes a time-based video asset: `MomentResolver` reads
+`durationSeconds` + `useful_segments`; the Edit Planner retimes/trims spans; `MediaEngineV1` composes via
+`AVAssetExportSession`/`AVMutableComposition`. Asset Understanding ingests **frames**, so a still photo
+would survive AU — but the renderer would have to synthesize a duration for a 0-duration still. **This
+is the single biggest structural fact for the photo-capture question (Phase 5.8).**
+
+**Orientation:** nothing sets `videoRotationAngle`/`videoOrientation` on the capture connection today —
+recordings rely on default sensor orientation. "Reliable orientation" is therefore partly a **latent
+existing gap**, not purely new work.
+
+---
+
+## Phase 2 — Per-feature estimates
+
+Impl / Test / Total in engineer-hours. "Break-recording risk" = risk to the continuous-recording
+guards; "Break-AI-scan risk" = risk to the concurrent scan output.
+
+| # | Feature | Status | AVFoundation APIs to reuse | Impl | Test | Total | Cplx | Break-recording | Break-AI-scan |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Preview + recording controls | **existing** (solid) | already in place | 1 | 1 | **2** | Low | — | — |
+| 2 | Tap to focus & expose | missing | `focusPointOfInterest`+`focusMode`, `exposurePointOfInterest`+`exposureMode`, `lockForConfiguration` | 3 | 2 | **5** | Low | Low | Low |
+| 3 | Pinch to zoom | missing | `videoZoomFactor` (ramped), `UIPinchGestureRecognizer` | 3 | 2 | **5** | Low | Low | Low |
+| 4 | Lens 0.5/1/2× | missing | `builtInTriple/Dual/WideAngleCamera`, `virtualDeviceSwitchOverVideoZoomFactors`, or discrete input swap | 6 | 5 | **11** | **High** | **Medium** | Medium |
+| 5 | Front/rear switch | missing | remove/add `AVCaptureDeviceInput` inside `beginConfiguration` | 5 | 4 | **9** | Medium | **Medium** (gate out of `.recording`) | Low (re-bind scan output) |
+| 6 | Photo + video capture | missing | `AVCapturePhotoOutput`, `capturePhoto(with:)`, photo delegate | 8+ | 6+ | **14+** | **High** | Medium | Medium |
+| 7 | Flash / torch | missing | `torchMode`/`setTorchModeOn(level:)`, `hasTorch`; photo `flashMode` | 2 | 2 | **4** | Low | Low | Low |
+| 8 | Reliable orientation + feedback | partial (latent gap) | `videoRotationAngle` / `RotationCoordinator` (iOS 17+) / `videoOrientation` | 4 | 4 | **8** | Medium | Low–Medium | Low |
+| 9 | Exposure adj + AE/AF lock | missing | `setExposureTargetBias`, `exposureMode=.locked`, `focusMode=.locked` | 4 | 3 | **7** | Low | Low | Low |
+
+### Feature 6 — explicit downstream analysis (required by the owner)
+
+Adding `AVCapturePhotoOutput` to the session is a one-time `beginConfiguration` addition and is **safe
+for the video session** (same pattern as the existing movie + data dual-output). The real cost is **not
+the camera — it's the pipeline**: Moment persistence, AU, and final Story generation all assume a video
+with a real `durationSeconds`. A photo Moment needs either:
+
+- **(a)** `AssetModel.mediaType` + still-image handling in `MomentResolver` / `MediaEngineV1` (synthesize
+  a Ken-Burns / hold duration), OR
+- **(b)** convert the still to a short video clip at capture time (far cheaper, avoids a
+  persistence-contract change).
+
+Option (b) is the cheaper path and avoids a contract change — but **true still Moments (option a) require
+a frozen-persistence-contract decision**, which is out of scope for this assessment. This is the only
+feature that cannot be fully delivered without a separate owner decision (see Phase 5.8).
+
+### Device-compatibility note (required)
+
+Lens availability is **per-model**: SE/entry phones have **no 0.5× ultra-wide and no 2× tele**; Pro
+phones have triple cameras. Feature 4 **must** query `AVCaptureDevice.DiscoverySession` at runtime and
+show only the lenses present. Torch presence (`hasTorch`), HDR, and front-camera capabilities also vary.
+Never assume uniform hardware across iPhones.
+
+### Dependencies
+
+- 2, 3, 9 share the "lock device + configure" primitive.
+- 4 depends on 3 (zoom-factor lens switching *is* zoom).
+- 7's photo-flash depends on 6.
+- 8 is independent but interacts with 5 (front camera mirrors; orientation differs).
+- 5 and 6 both touch session reconfiguration.
+
+---
+
+## Phase 3 — Shared work (de-duplication)
+
+The per-feature estimates double-count foundational work. The shared substrate, counted **once**:
+
+| Shared component | Hrs | Feeds features |
+|---|---|---|
+| `lockForConfiguration` device-config helper + session-queue serialization | 3 | 2,3,4,7,9 |
+| Device-capability detection (`DiscoverySession`, `hasTorch`, lens set) | 3 | 4,5,7 |
+| Gesture layer (pinch + tap) wired into SwiftUI `ContinuousCameraHost` | 2 | 2,3 |
+| Zoom/lens UI (segmented 0.5/1/2× + focus reticle) | 3 | 3,4,2 |
+| Orientation handling on connections | 3 | 6,8 |
+| Capture-state extension (keep the strict phase machine valid under new actions) | 2 | 5,6 |
+| Physical-device test harness / checklist across SE + Pro | 4 | all |
+| **Shared total** | **~20** | |
+
+**Realistic all-nine total ≠ the per-feature column sum (65h).** With shared work counted once, the
+honest all-nine figure is **≈ 42–48 engineering hours (≈ 5.5–6 engineer-days)**. The range reflects
+lens-switching and photo-pipeline uncertainty.
+
+---
+
+## Phase 4 — Three implementation packages
+
+### Package A — Essential camera upgrade (target 1–2 days)
+- **Included:** #2 tap focus/expose, #3 pinch zoom, #7 torch, #1 polish. Continuous zoom (incl. into
+  ultra-wide/tele ranges) via `videoZoomFactor` + a simple device-capable 1×/2× toggle.
+- **Lens note:** defer *discrete* 0.5× ultra-wide device-switching to B — it is the expensive part of #4.
+- **Deferred:** front/rear, photo, full exposure-bias slider, orientation hardening.
+- **Engineering ≈ 14h · Device testing ≈ 5h · Total ≈ 19h (~2.5 days — trim torch to hit a true 2d).**
+- **Risks:** low — all additive device config, no session rebuild, no recording-path change.
+- **User-visible win:** the camera feels native — zoom + tap-to-focus. Highest perceived gain per hour.
+- **Acceptance tests:** pinch zooms smoothly during recording; tap sets focus+exposure with a reticle;
+  torch toggles only where `hasTorch`; zoom persists across start/stop; AI scan still works mid-zoom.
+
+### Package B — Complete everyday camera (target 3–5 days)
+- **Included:** A + #5 front/rear (gated between recordings), #4 discrete 0.5/1/2× lens selection
+  (device-aware), #8 reliable orientation, #9 exposure/AE-AF lock. **Photo only if** the team accepts the
+  capture-time still→clip approach (option b, no contract change); otherwise photo stays in C.
+- **Deferred:** true still-photo Moments requiring a persistence-contract change.
+- **Engineering ≈ 34h · Device testing ≈ 12h · Total ≈ 46h (~5.5 days).**
+- **Risks:** medium — lens switching + front/rear both reconfigure the session; must preserve the
+  continuous-recording guards and re-bind the scan output after any input swap.
+- **User-visible win:** a phone camera covering normal travel capture end-to-end.
+- **Acceptance tests:** lens buttons show only device-available options; front/rear disabled while
+  `.recording`; rotating the phone yields correctly-oriented clips in the final Story; AE/AF lock holds;
+  AI scan + persistence unaffected after every switch.
+
+### Package C — Full requested set (all 9; realistic even if >5 days)
+- **Included:** everything, **including true photo Moments** with the required `AssetModel.mediaType` +
+  downstream still handling.
+- **Engineering ≈ 42–48h camera/UI + 10–16h pipeline** (persistence contract, `MomentResolver`,
+  `MediaEngineV1` still support, AU duration synthesis, Story-generation tests) = **≈ 58–64h
+  (~7.5–8 days).**
+- **Risks:** high — the only package touching the **frozen persistence contract** and the render/plan
+  pipeline; needs owner approval for a schema change + a round of Story-generation regression testing.
+- **User-visible win:** full parity with the request; mixed photo+video Stories.
+- **Acceptance tests:** B's tests + a photo Moment survives AU, persists, and renders into a Story with a
+  sensible hold duration; existing all-video Stories unchanged.
+
+---
+
+## Phase 5 — Architecture risks (blockers vs ordinary work)
+
+1. **Lens switch without rebuilding the session** — *Ordinary work.* `videoZoomFactor` across a virtual
+   multi-camera device needs **no** rebuild; discrete device swap needs a `beginConfiguration` reconfig
+   (not a new session). Not a blocker.
+2. **Zoom during recording** — *Ordinary, already safe.* Zoom is a device property; both outputs follow.
+3. **Front/rear restricted to between recordings** — *Design decision, not a blocker.* Switching inputs
+   mid-record would corrupt the movie file; **gate it out of `.recording`** (the phase machine already
+   enforces exactly this for taps). Recommend: disabled while recording.
+4. **Photo + video outputs coexisting** — *Ordinary work.* The existing dual-output (movie + data)
+   already proves coexistence; adding `AVCapturePhotoOutput` is one more `canAddOutput`. Not a blocker
+   at the camera layer.
+5. **AI scanning vs photo/config** — *Ordinary, low risk.* Scan reads the shared data output; it already
+   runs during recording. A photo capture is a brief event on a different output. Minor: a torch/lens
+   change mid-scan slightly alters frames — acceptable.
+6. **Changing devices affects orientation/audio/focus/exposure** — *Ordinary work, needs discipline.*
+   After an input swap you must re-apply focus/exposure defaults, re-bind the audio input, re-set the
+   connection orientation, and reset zoom. Main source of B's testing hours.
+7. **Continuous-recording safety guards remain valid** — *Must be actively preserved.* The strict phase
+   machine, token dedup, interruption/backgrounding handling, and serialized persistence are the crown
+   jewels. New actions (switch/photo) must be rejected out-of-phase exactly like taps are today. A
+   regression risk if ignored, not a blocker if respected.
+8. **Photo capture needs Moment-model / pipeline changes** — ***GENUINE BLOCKER (the only one).***
+   `AssetModel` has no media-type and a non-optional `durationSeconds`; `MomentResolver`/Edit
+   Planner/`MediaEngineV1` all assume time-based video. True still Moments require a
+   persistence-contract change + downstream still handling — explicitly out of scope here, needs owner
+   approval. Everything else is ordinary implementation work.
+
+---
+
+## Phase 6 — Final recommendation
+
+| Feature | Existing status | Impl hrs | Test hrs | Risk | Recommended package |
+|---|---|---|---|---|---|
+| 1 Preview/record controls | existing | 1 | 1 | — | A (polish) |
+| 2 Tap focus & expose | missing | 3 | 2 | Low | **A** |
+| 3 Pinch zoom | missing | 3 | 2 | Low | **A** |
+| 4 Lens 0.5/1/2× | missing | 6 | 5 | High | B (continuous-zoom part in A) |
+| 5 Front/rear switch | missing | 5 | 4 | Medium | B |
+| 6 Photo + video | missing | 8+ | 6+ | High | C (needs contract change) |
+| 7 Flash/torch | missing | 2 | 2 | Low | **A** |
+| 8 Orientation + feedback | partial (latent gap) | 4 | 4 | Medium | B |
+| 9 Exposure adj + AE/AF lock | missing | 4 | 3 | Low | B |
+
+**Summary**
+1. **Package A total:** ≈ **19h (~2.5 days)** — zoom, tap-focus/expose, torch. Trim torch for a true 2d fit.
+2. **Package B total:** ≈ **46h (~5.5 days)** — the complete everyday travel camera (no true-still photo).
+3. **Package C total:** ≈ **58–64h (~7.5–8 days)** — all nine, incl. photo with a persistence-contract change.
+4. **Shared engineering work:** ≈ **20h** counted once (device-config helper, capability detection,
+   gestures, zoom/lens UI, orientation, state-machine extension, device test harness) — why summing
+   per-feature rows (65h) overstates the real all-nine cost (~42–48h camera + pipeline).
+5. **Biggest technical uncertainties:** (a) discrete **lens switching** across the SE→Pro device matrix;
+   (b) the **photo persistence/render** path (the only contract-touching work); (c) **orientation**
+   correctness feeding the final render — all three carry the widest hour ranges and need physical-device
+   verification.
+6. **Should be deferred:** true still-photo Moments (#6 full form) — blocked on a persistence-contract
+   decision; keep out of MVP.
+7. **Recommended MVP scope:** **Package A now** (continuous zoom + tap focus/expose + torch) — highest
+   perceived improvement, ~2–2.5 days, zero risk to the recording guards, AI scan, persistence, or render
+   pipeline, and no contract change. Promote to **Package B** post-MVP once travel usage justifies
+   front/rear + discrete lenses + orientation hardening. Hold **Package C / photo** until a separate
+   owner decision on the persistence contract.
+
+---
+
+## Decision gate
+
+STOP after the assessment. No camera features implemented, no engine rewrite, no production files
+modified, no persistence contracts changed, nothing pushed or deployed. The owner chooses Package A, B,
+or C after reviewing these estimates; the chosen package becomes the default scope and its results will
+be written back to this doc (and a per-phase completion/eval report) once implementation runs.
