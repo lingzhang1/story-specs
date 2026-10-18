@@ -398,3 +398,34 @@ slider feel (as Increment 1 needed three device-driven follow-ups).
    unaffected after every control action.
 2. Still deferred (owner): native photo capture + pipeline, still→video conversion, pro controls.
 3. Separate follow-up: camera-metadata audit (capture timestamp, optional GPS, orientation).
+
+---
+
+## Owner device acceptance — PACKAGE B COMPLETE (2026-10-18)
+
+Owner confirmed both increments pass on device:
+- **Increment 1 accepted** (after three device-driven follow-ups: gradual zoom ladder `2f0401d`, focus
+  reticle coordinate-space `f67f172`, strip default-visibility + live magnification `1be4a4a`).
+- **Increment 2 accepted** (`53630aa`): flip front↔rear between recordings, exposure sun-slider, AE/AF
+  lock with tap-to-clear, post-swap orientation.
+
+**Modified Package B is DONE.** Shipped set: pinch + device-aware gradual zoom presets with live
+magnification, tap focus/expose, torch, orientation fix/hardening, front/rear switch, exposure
+adjustment, AE/AF lock — all additive on `ContinuousCameraController`, preserving continuous recording,
+AI scanning, persistence, and interruption handling; no new engine, no persistence/contract change.
+
+**Total actual implementation time ≈ 3h** across both increments (vs the ~19h Package-A + ~22h
+Increment-2 estimates) — the overrun-in-reverse is because the first increment built a reusable
+device-config/capability/event substrate that the second increment and every follow-up fix drew on. The
+estimates correctly identified device testing as the real cost: Increment 1 took three on-device
+iterations; Increment 2 was accepted first pass.
+
+**App commits (local):** `572ec2d`, `2f0401d`, `f67f172`, `1be4a4a` (Increment 1), `53630aa`
+(Increment 2). **Specs commits:** `b4212cc` (assessment), `61f7ee6` (I1 results), `2fde7a8` (I2 results),
++ this acceptance record.
+
+### Remaining (separate owner decisions — NOT part of Package B)
+1. Native photo capture + photo/video Moment pipeline — **deferred**, blocked on a persistence-contract
+   decision (see Phase 5.8).
+2. Capture-time still→video conversion — **deferred**.
+3. Camera-metadata audit (capture timestamp, optional GPS, orientation) — **follow-up**, not started.
