@@ -114,3 +114,48 @@ Only Option **C** can satisfy all of these without touching the capture engine.
 
 Stop before implementing any new video-processing or rendering engine. Part A is cleared to build (no
 contract change); Part B remains audit-only. Owner chooses whether to implement Part A now.
+
+---
+
+## Implementation Results — Part A location metadata (commit `90651c5`, DEVICE-ACCEPTED 2026-10-18)
+
+**Status:** implemented, parse-clean, committed, **device-accepted** (owner verified actual metadata in
+all four file types). iOS-only; additive; no render-pipeline change (Part B remains deferred). Nothing
+pushed/deployed.
+
+### What shipped (all 7 safeguards met)
+
+| # | Safeguard | Delivery |
+|---|---|---|
+| 1 | Permission UX | `CaptureLocationService` requests **When-In-Use only after** a benefit-first explainer (shown once via `@AppStorage`). Camera startup + recording never await authorization. `NSLocationWhenInUseUsageDescription` added to `Info.plist` (merged via `GENERATE_INFOPLIST_FILE`, confirmed by the already-working `UIAppFonts` from the same plist). |
+| 2 | Location quality | `fix(at:)` validates **freshness (≤60 s of the capture instant) AND horizontal accuracy (>0, ≤100 m)**; else `nil` = unknown. No reverse-geocode, no venue/place name. |
+| 3 | Persistence | `AssetModel` + optional/defaulted `capturedAt`, `latitude`, `longitude`, `locationAccuracyMeters` (lightweight additive migration — existing populated store loads clean). `capturedAt` (true capture instant) kept separate from `createdAt` (persist/import time). |
+| 4 | Original + Photos | `.mov` carries ISO-6709 GPS via `movieOutput.metadata` at record start; `PhotosSaver` sets `creationDate` + `location` on the Photos copy. |
+| 5 | Imports | `ImportedMediaMetadata` recovers creation date + ISO-6709 location from the file's OWN embedded metadata (no PHAsset/asset-id dependency; works without Photos read-auth); `nil` when absent. |
+| 6 | Privacy | `MediaEngineV1` builds a fresh `AVMutableComposition` and sets NO metadata → exports carry no GPS by construction (render pipeline untouched). |
+| 7 | Regression | Additive only; recording path, camera controls, AI scan, orientation, Moment persistence, Story generation unchanged. |
+
+### Device acceptance — ACTUAL metadata verified by owner
+- **Story-recorded `.mov`:** GPS present (when a trustworthy fix existed) + correct capture time. ✅
+- **Apple Photos copy:** correct creation date + location. ✅
+- **Imported media:** original creation date + location recovered from the file; graceful when absent. ✅
+- **Generated Story export:** NO precise GPS. ✅ (the privacy guarantee, confirmed on the real file)
+
+### Files
+New: `apps/ios/Story/Story/Media/Camera/CaptureLocationService.swift`,
+`apps/ios/Story/Story/Media/Photos/ImportedMediaMetadata.swift`,
+`apps/ios/Story/StoryTests/CameraMetadataTests.swift`.
+Changed: `Media/Photos/PhotosSaver.swift`, `Data/Persistence/Models.swift`,
+`Media/Camera/ContinuousCameraController.swift`, `Features/Capture/ContinuousCaptureModel.swift`,
+`Features/Capture/ContinuousCaptureView.swift`, `Features/StoryHome/StoryPhotosPicker.swift`,
+`Domain/UseCases/StoryUseCases.swift`, `Story/Info.plist`.
+
+### Tests
+Pure fix-validation (fresh+accurate / stale / inaccurate / negative-accuracy) + ISO-6709 and capture-date
+parsing (`CameraMetadataTests`). Device-dependent paths (CLLocationManager delegate, `.mov` embedding,
+Photos metadata, live import recovery, no-GPS export) verified in physical-device acceptance above.
+
+### Status of the overall task
+- **Part A: DONE + device-accepted.**
+- **Part B (facial enhancement): deferred** per owner — not implemented. Recommendation on record: Option
+  C (render-time, post-MVP); reject Option B (capture-time, would replace the movie-output engine).
