@@ -103,8 +103,53 @@ Per scenario verify: user-intent satisfaction, preservation of unrelated edits, 
 behavior, renderer executability, no unintended replan, model-call count, latency, correct
 `parentVersionId`, previous version unchanged.
 
+## Retime correction — trim at normal speed (commit `5b2fcc0`), and 7-point verification (`bac6fe7`)
+
+**Observed on device** (job `78350357`, retime fired correctly: clips kept, shortened, 0 model calls):
+most clips played at ~1.8–2.0x with pitched-up native audio. **Root cause:** the first retime kept each
+clip's full source span and shrank `output_duration`, so the renderer derived `speed = span/output` and
+ran the footage fast. **Fix:** "shorten a clip to ~5s" now means *show ~5s of footage at normal speed* —
+the retime **trims the source window** to `start + target` (preserving the planner's in-point), sets
+`output_duration = trimmed span`, and keeps `speed = 1.0`. A clip already shorter than the target keeps
+its whole window (never stretched). It never auto-increases playback speed or pitch-shifts audio.
+
+**Verification (all confirmed in code + tests, 116 pass):**
+1. Selected-version segment identities + order preserved — yes (clip set and order byte-identical).
+2. Every revised segment `speed == 1.0` for this instruction — yes.
+3. Native audio synchronized + normal pitch — yes (`output_duration == trimmed source span`, so playback
+   is 1:1; `native_audio` policy unchanged).
+4. Duration follows the user's request, not the old AI target — yes (undershoot floor relaxed for a
+   timing-only `ai_recommended` revise; total shortens to the per-clip request).
+5. Protected continuous performances — **limitation (see below):** no protected-performance signal exists
+   in today's schema, so ordinary unprotected shots get the bounded start-trim; a clip already shorter
+   than the target is not shortened.
+6. Reliable AU timestamps / action anchors not cut off — **partial (see below).**
+7. Validation failure never triggers unrestricted replanning — yes: a timing retime that cannot validate
+   raises a clear limitation (`revision_path=deterministic_retime_infeasible`, `model_calls=0`, "your
+   current version was kept unchanged"), never falling through to the model.
+
+## Point-6 feasibility — can a bounded deterministic highlight-aware trim be built now?
+
+**Finding: partially. Reliable timestamps exist; a quantitative highlight/action ranking does not.**
+- `moments[].useful_segments` are **numeric `(start, end)` windows** (possibly several per Moment) — the
+  planner already uses them, and they are reliable. A bounded, deterministic improvement is feasible
+  **without any model**: snap the trimmed window to lie *inside a single `useful_segment`* (don't trim
+  across a window boundary; prefer the longest/earliest usable window) instead of blindly from the clip's
+  `source_start`.
+- `moments[].events` carry only a **description string** — the planner does not read a per-event
+  timestamp, so events cannot anchor a trim today.
+- EditPlan/2 segments carry `narrative_role` (free text) and `music_alignment.anchor` — neither marks a
+  **protected continuous performance**, so a performance cannot be detected deterministically yet.
+
+**Decision (owner-directed):** keep the bounded start-trim for ordinary unprotected shots now; do NOT
+build a multimodal highlight-selection model. Deferred as a future bounded increment: (a) snap-to-
+useful-segment trimming, and (b) a protected-performance / minimum-duration signal so continuous
+performances are not shortened below a floor.
+
 ## Remaining limitations / deferred
 
+- **Protected continuous performances & highlight-aware trim** — no schema signal today (see point 6);
+  bounded snap-to-useful-segment + protected-duration floor deferred.
 - **Phase 5 unsupported-operation handling** (color correction, photo adjustments, unsupported speed
   effects, reframing): explain the limitation, preserve the version, never fabricate/substitute — NOT
   yet built; separate increment per owner's "do not implement every repair this increment."
