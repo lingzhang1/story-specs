@@ -385,3 +385,37 @@ New stack **`story-<env>-auth`** (`infrastructure/cdk/lib/story-auth-stack.ts`),
 **Local verification:** `tsc` clean; **jest 16/16 pass** (9 new auth-stack assertions + 7 existing api-stack,
 unchanged); `cdk synth story-<env>-auth -c deployAuth=true` produces a valid template. **Nothing provisioned
 or deployed. STOPPED at the pre-provisioning gate.**
+
+### Increment 1 corrections (owner, 2026-10-18) — applied before dev provisioning
+1. **Identity uniqueness is now ATOMIC, not GSI-only.** New table `story-<env>-identity-claims` (PK
+   `claim_key` = `cognito#<sub>` | `apple#<sub>` | `email#<verified_email>`). A sign-in/link does a conditional
+   `PutItem attribute_not_exists(claim_key)` — or a `TransactWriteItems` that writes the StoryUser row AND the
+   claim together — so a concurrent second claim for the same subject FAILS atomically. One subject/provider
+   identity → exactly one `story_user_id`, even under race. The StoryUser GSIs are now **lookup-only**.
+2. **Apple flow corrected.** A User Pool federates Apple via the **OAuth Authorization-Code + PKCE** flow
+   against a **Cognito domain** (`story-<env>-auth.auth.<region>.amazoncognito.com`) — the native
+   `ASAuthorization` identity token **cannot** be exchanged directly for User-Pool tokens (that is
+   Identity-Pool-only). iOS: `ASWebAuthenticationSession` → Cognito `/oauth2/authorize?identity_provider=
+   SignInWithApple` → Apple → custom-scheme callback `story://auth` → code → Cognito `/oauth2/token` → id/
+   access/refresh JWTs. Added: Cognito domain, `authorizationCodeGrant` + `callbackUrls` on the client.
+   Linking an Apple identity to an existing Story account is the same code-grant + the atomic claim write (1).
+3. **Passwordless hardened.** First-auth factors = **`[EMAIL_OTP]` only** (PASSWORD removed); client
+   `ExplicitAuthFlows` = `[ALLOW_USER_AUTH, ALLOW_REFRESH_TOKEN_AUTH]` (no SRP, no password flow).
+4. **Rollout safety — prod is FAIL-CLOSED, not a flag flip.** The dev-only "optional-auth" window is a
+   DEV-environment default. **Production enforcement is NOT a toggle:** the backend reads enforcement from
+   the environment and prod is hard-wired to REQUIRE a verified JWT on every paid AI/music endpoint — there is
+   NO prod env value that reopens unauthenticated paid inference (the "optional" branch is unreachable when
+   `environment == production`; an unset/invalid flag defaults to REQUIRED, never OPEN). The `STORY_REQUIRE_
+   AUTH=0` escape is a **dev/staging-only** rollback lever and is rejected in prod config.
+   **Local-data visibility on sign-out / account switch:** sign-out clears tokens + the in-memory session and
+   clears `LocalIdentityModel.accountId`, but **leaves all SwiftData on disk**. Local Stories/Moments captured
+   before/without sign-in remain visible locally (local-first). On account SWITCH, the new account sees its
+   OWN cloud content; **pre-existing local content is NOT auto-attributed to the new account** — it stays
+   bound to the first account that adopted it (its `ownerAccountId`), so one user's local Stories are never
+   silently exposed under another signed-in account. Cloud reads/writes are always scoped to the authenticated
+   `story_user_id`.
+
+**Dev-provision note (correction 9):** Apple creds are not yet available, so the Apple IdP is created ONLY
+when `-c applePrivateKey=...` is supplied. The dev stack provisions NOW with pool + EMAIL_OTP + domain +
+tables; Apple is added later without a rebuild. Email OTP needs no Apple creds. **Local re-verification after
+corrections:** tsc clean, **jest 20/20**.
