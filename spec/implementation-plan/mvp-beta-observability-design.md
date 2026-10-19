@@ -188,3 +188,44 @@ is now a co-equal beta gate, not a tail task.
 ## Decision gate
 
 STOP at owner approval before provisioning or changing production infrastructure. No public deploy.
+
+---
+
+## APPROVED for DEV implementation (2026-10-18) — 7 amendments
+
+Owner approved dev implementation in reviewable increments; dev-only provisioning (account
+989088054552); no prod/public deploy. Amendments folded into the contracts:
+
+1. **Backend-plan vs client-playback are SEPARATE state machines.** Backend: submitted→planning→
+   plan_ready→(worker done). Client: render_start→render_end→export→first_playable. `PlanCompleted` is
+   NEVER counted as `VideoPlayable`; `TimeToPlayableVideo` is a CLIENT metric only. Dashboards show them
+   as distinct series, explicitly labeled.
+2. **Logical stage ≠ physical invocation ≠ billable attempt.** `stage` (coverage|guide|duration|edit_plan|
+   repair|critique|music_plan) is logical; `provider_attempt` is the physical Bedrock call #; a billable
+   attempt is any provider call that consumed tokens (including a fallback attempt and a repair call).
+   `EstimatedModelCostUSD` sums ALL billable attempts, includes **multimodal/image token usage** (edit-plan-mm
+   contact sheets) and **fallback** attempts. **Documented estimation limits:** image-token accounting is
+   Bedrock's reported input tokens (we do not re-derive tile cost); pricing is a CDK-config table that can
+   drift from real Bedrock prices; a crash mid-call may under-count. Metric is labeled "estimated".
+3. **Low-volume alarm safeguards:** every rate/percentage alarm carries a MINIMUM SAMPLE COUNT (e.g.
+   GenerationFailed% only evaluates with ≥5 starts in the window) so one failure in two requests is not a
+   page; `treatMissingData` set explicitly (notBreaching for health %, breaching for DLQ depth); thresholds
+   are actionable (tied to a human response, not vanity). **Quota DENIALS (normal: user hit cap) are a
+   separate metric from quota-ENFORCEMENT ERRORS (the quota check itself failed)** — only the latter alarms.
+4. **iOS telemetry endpoint hardening:** `/v1/telemetry` requires the SAME auth principal as the rest of
+   the API (arrives with auth milestone; until then dev-gated), VALIDATES the event schema, enforces a
+   BODY SIZE LIMIT and a PER-USER RATE LIMIT. Client telemetry is NEVER authoritative for billing or
+   quotas (those are server-measured only). Client durations use a MONOTONIC clock (not wall time) for
+   time-to-playable, so a clock change can't produce negative/huge spans.
+5. **Low-cardinality dimensions, no PII** — reaffirmed: dims limited to env/service/op_type/stage/
+   error_category/model_id. NEVER a raw user id, job id, GPS, prompt, or media in a dimension OR a log.
+6. **Dev independence:** infrastructure + AI observability (SQS/Lambda/App Runner/DynamoDB metrics,
+   model usage/latency/throttle/fallback/cost) ship in DEV NOW, independently. Security + per-user metrics
+   (auth failures, authz denials, quota, active users) integrate WITH the auth/quota milestone (no principal
+   exists yet). Dashboards reserve those widgets with "pending auth" placeholders.
+7. **Acceptance includes REAL notification delivery** via safe dev fault injection (owner provides the SNS
+   destination; alarm fires → notification actually received).
+
+**Dev provisioning dependency:** alarm-notification acceptance (#7) needs the owner's SNS destination
+(email or Slack webhook). Everything else (EMF metrics, dashboards, alarm definitions, token-cost
+surfacing, iOS endpoint) is built + dev-provisioned without it; the SNS subscription is the one value to fill.
