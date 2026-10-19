@@ -1,5 +1,15 @@
 # Story — Dev Deployment & Rollback Runbook (Gate 2)
 
+> **STATUS: Gate 2 CLOSED & ACCEPTED (2026-10-18, owner).** This is the accepted single dev deploy
+> authority. **Two acceptance cases remain unverified and are accepted as known limitations** (CI/CD
+> not to be reopened absent a release-blocking defect):
+> 1. A successful *valid-plan* async smoke was NOT independently demonstrated — two attempts ended as
+>    clean structured failures (`invalid_after_repair`, `internal`) from non-production-shaped fixtures.
+>    The async pipeline (202 → SQS → Lambda → DynamoDB → GET) IS proven end-to-end and the DLQ stayed clean.
+> 2. An A→B→A in-flight deployment + rollback was NOT exercised. The worker's `_test_delay_s` hook sleeps
+>    *before* `engine.generate()`, so it does NOT bypass Bedrock; a true no-inference in-flight test would
+>    require a dev-only worker synthetic short-circuit (out of scope at closure).
+
 The SINGLE authoritative development deployment path. Immutable, keyless, pipeline-controlled.
 No production in scope. Dev account `989088054552`, region `us-east-1`.
 
