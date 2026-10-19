@@ -290,3 +290,98 @@ device + Apple Developer config).
 5. **Legacy dev-job policy** — proposed: retain, never serve to real accounts. Confirm.
 6. **STOP GATE honored:** no AWS identity resources provisioned, no auth deployed, no billing, CI/CD not
    reopened, no unrelated features. Awaiting architecture approval.
+
+---
+
+## Increment 1 — approved (2026-10-18) + amendments implemented (DESIGN/CDK/local-tests only)
+
+Owner approved Cognito as primary IdP with 9 amendments. Below: what was verified and what was built. **No
+Cognito/SES/prod infrastructure provisioned — CDK synth + local jest only.**
+
+### Amendment 2 — native EMAIL_OTP VERIFIED; custom OTP Lambda triggers NOT needed
+AWS docs confirm native passwordless **`EMAIL_OTP`** runs through the **`USER_AUTH` choice-based flow** via the
+**SDK** (`InitiateAuth` `AuthFlow=USER_AUTH` + `PREFERRED_CHALLENGE=EMAIL_OTP` → `CodeDeliveryDetails`, then
+`RespondToAuthChallenge`) — i.e. **headless, no hosted/managed web UI required**, which fits native iOS. The
+"passwordless needs managed login" caveat applies only to the *hosted-UI* path, not the SDK path.
+**Decision: use native EMAIL_OTP; do NOT build Define/Create/Verify custom-auth Lambdas.** Cognito manages
+code generation, single-use, expiry, and attempt limits.
+- **Prerequisite:** native `EMAIL_OTP` requires the **Essentials** feature plan (Lite lacks it).
+- **Native gap (documented, app/edge-side):** fine-grained **resend cooldown** and **per-IP issuance
+  rate-limit** are not first-class in the native flow — handle via app-side cooldown + (later) WAF/throttle
+  on the auth edge. This does not justify custom Lambdas for beta.
+
+### Cost estimate (realistic, post-Nov-2024 pricing)
+- **Cognito Essentials:** the legacy 50k-MAU free tier is **gone** for new pools. Essentials ≈ **$0.015/MAU**
+  (small monthly free allowance). Beta at ~1k MAU ≈ **$15/mo**; 5k ≈ **$75/mo**. (Plus = $0.020/MAU, not
+  needed; Lite is cheaper but cannot do EMAIL_OTP.)
+- **Email delivery:** Cognito default email sender is rate-limited (≈50/day-class) — fine for dev, **not** for
+  beta volume. Production uses **SES**: ≈ **$0.10 per 1,000 emails**; at a few k OTP sends/mo ≈ **< $1/mo**.
+- **DynamoDB** (StoryUser + UserUsage, on-demand): negligible at beta scale (**< $2/mo**).
+- **Total beta auth cost ≈ $15–80/mo**, dominated by Cognito MAU.
+
+### Amendment 3 — identity separation (implemented in the data model)
+- **`story_user_id`** — immutable **application-owned UUID**, the authoritative identity (PK of StoryUser +
+  UserUsage). Never an email/relay/device/cognito value.
+- **`cognito_sub`** — the Cognito authentication subject; mapped TO `story_user_id` via the **`by_cognito_sub`
+  GSI**, which `require_user()` resolves on every request.
+- **Provider identities** — `apple#<sub>` / `email#<verified_email>` recorded under the
+  **`by_provider_identity`** GSI, which also **guards linking collisions** (a provider identity maps to exactly
+  one `story_user_id`). **Linking is an explicit authenticated write with proof-of-control; there is NO
+  automatic email-based merge.** First sign-in mints a new `story_user_id`; a subsequent *explicit* link
+  attaches the second provider to the SAME `story_user_id`.
+
+### Amendment 4 — job ownership from authenticated identity only
+`require_user()` yields `story_user_id`; new jobs store it in the (now trusted) `owner` attribute. The
+client-supplied `owner` is ignored. **Idempotency fingerprint is scoped to `story_user_id`** so two users
+cannot collide on one `operation_id`. **Existing `owner="dev"` jobs stay isolated**: no real `story_user_id`
+equals `"dev"`, so an ownership check (== `story_user_id` else 404) never matches them — they are retained,
+never served to a beta account. Lease fencing + payload-409 unchanged.
+
+### Amendments 5–7 — recap (unchanged design, now binding)
+- (5) `require_user()` applied to **all 13 sync Bedrock + 4 paid Epidemic endpoints**, not just async.
+- (6) Local-first preserved; **account switch/logout** = clear tokens + in-memory session, **leave SwiftData
+  on disk**, and re-scope by setting/clearing `LocalIdentityModel.accountId`; a second account signing in on
+  the same device sees its OWN cloud content and the device's local content is only *adopted* by the FIRST
+  account (never auto-exposed to a different account).
+- (7) Beta allowlist (Cognito group or `StoryUser.beta_access`) + **atomic quota reservation** before any
+  expensive inference, both authoritative server-side; App Attest/DeviceCheck are **supplementary signals
+  only**, never a substitute for identity or quota.
+
+### Amendment 8 — dev→beta authentication cutover plan
+1. **Deploy order:** provision `story-*-auth` (Cognito + tables) FIRST, with endpoints still open → backfill
+   nothing (no real users yet) → ship a backend that ACCEPTS a JWT when present but does not yet REQUIRE it
+   ("optional-auth" window) → flip each endpoint to REQUIRED once the iOS build that sends tokens is in
+   TestFlight.
+2. **Existing iOS builds:** older builds send no `Authorization` header and `owner="dev"`. During the
+   optional-auth window they keep working; at the REQUIRED flip they get 401 and must update — so the flip is
+   gated on the authed TestFlight build being live. Communicate a min-build requirement.
+3. **Old jobs:** `owner="dev"` jobs are orphaned/dev-only, retained, never served to a real `story_user_id`.
+4. **Token refresh:** 60-min access/id tokens, 30-day rotating refresh in iOS keychain; silent refresh on
+   401; refresh failure → re-auth (Apple or Email OTP).
+5. **Rollback:** auth is a SEPARATE stack; disabling enforcement is a backend env flag (`STORY_REQUIRE_AUTH=0`)
+   — flip it off to revert to open behavior WITHOUT destroying the pool or user data. The pool/tables are
+   `RETAIN`, so a stack rollback never deletes identities.
+
+### Amendment 9 — prerequisites (NOT assumed present)
+- **SES:** verified read-only — **0 identities, `ProductionAccessEnabled=False` → SANDBOX.** Production access
+  is a REQUIRED, not-yet-done provisioning step before external-beta Email OTP.
+- **Apple:** Sign in with Apple needs a Services ID, Team ID, Key ID, and a private key (Apple Developer
+  portal) — **placeholders only** in the CDK; injected from Secrets Manager at provision time. Not verified as
+  present (owner/Apple-portal action).
+
+### Exact resource changes (synth-verified, all `RETAIN`, NOT provisioned)
+New stack **`story-<env>-auth`** (`infrastructure/cdk/lib/story-auth-stack.ts`), instantiated ONLY with
+`-c deployAuth=true` (gate proven: a normal `cdk list` shows only `story-<env>-api`):
+- `AWS::Cognito::UserPool` `story-<env>-users` — Essentials tier, `SignInPolicy.AllowedFirstAuthFactors =
+  [PASSWORD, EMAIL_OTP]`, email alias+autoverify, EMAIL_ONLY recovery, RETAIN.
+- `AWS::Cognito::UserPoolIdentityProvider` `SignInWithApple` (credentials via context/Secrets at provision).
+- `AWS::Cognito::UserPoolClient` `story-<env>-ios` — public (no secret), `ExplicitAuthFlows =
+  [ALLOW_USER_AUTH, ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]`, 60-min tokens / 30-day refresh.
+- `AWS::DynamoDB::Table` `story-<env>-users` — PK `story_user_id`, GSIs `by_cognito_sub`,
+  `by_provider_identity`, PITR, RETAIN.
+- `AWS::DynamoDB::Table` `story-<env>-user-usage` — PK `story_user_id` + SK `quota_period`, PITR, RETAIN.
+- 5 `CfnOutput`s incl. the JWKS URL the backend will verify against.
+
+**Local verification:** `tsc` clean; **jest 16/16 pass** (9 new auth-stack assertions + 7 existing api-stack,
+unchanged); `cdk synth story-<env>-auth -c deployAuth=true` produces a valid template. **Nothing provisioned
+or deployed. STOPPED at the pre-provisioning gate.**
