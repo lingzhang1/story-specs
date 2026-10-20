@@ -75,8 +75,11 @@ No production resources. No reuse of the staging bucket for originals.
 | `GET /v1/media/{id}/download` | `require_user` | Short-lived presigned **GET** for the caller's own verified object; 409 if unverified. |
 | `GET /v1/media` | `require_user` | List the caller's own records (owner-PK Query). |
 
-Resumable multipart: a re-initiate recovers the same record; `AbortIncompleteMultipartUpload` is the S3-side
-backstop. Presigned TTLs bounded: upload 60 min, download 15 min. **No deletion endpoint exists** (reference-safe
+Resumable transfer (honest): this increment is a **single presigned PUT of the whole file**. An interrupted
+upload leaves the record `uploading`; recovery is **whole-file** — re-initiate (idempotent, same record) and
+re-PUT the entire file. **Part-level multipart resume is NOT implemented; it is deferred to R4.** The bucket's
+`AbortIncompleteMultipartUpload` rule is only a cost-hygiene backstop, not evidence of part-level resume.
+Presigned TTLs bounded: upload 60 min, download 15 min. **No deletion endpoint exists** (reference-safe
 deletion is a later increment).
 
 ---
