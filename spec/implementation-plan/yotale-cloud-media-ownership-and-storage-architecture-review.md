@@ -1,12 +1,57 @@
 # YoTale — Cloud-First Ownership, Local-First Capture & Media Storage Architecture Review
 
-Status: **ARCHITECTURE & ROADMAP REVIEW — owner approval required before any provisioning or migration.**
-Date: 2026-10-20
+Status: **DIRECTION ACCEPTED by owner (specs `9509b90`), with the 8 corrections in §0.0 applied. R1 is approved
+for implementation; all cloud provisioning/implementation remains behind the STOP gate.**
+Date: 2026-10-20 (corrections applied same day)
 Scope: iOS app (`apps/ios`), backend (`apps/api`), infra (`infrastructure/cdk`), specs.
 Trigger bug: two beta testers signed into the same iPhone and **shared every Story and Moment**.
 
 This review supersedes the prior "cloud media as post-MVP" framing. Cloud media storage is now a **core beta
 requirement**. No code was changed and no AWS resource was created in producing this document (STOP gate).
+
+---
+
+## 0.0 Owner corrections applied (2026-10-20)
+
+The owner accepted the overall direction and issued 8 corrections. Each is folded into the sections noted; the
+original design text below is retained and amended rather than rewritten.
+
+1. **Shared device-local Moments until cloud ownership begins** — a local-only Moment is **not ownerless**: it
+   belongs to the **device-local library**, is visible to **every** account on that iPhone, is captured without
+   login, and is **never auto-claimed** by the first account to sign in. Ownership begins only on verified cloud
+   upload. (Amends §1, §3, §7; the account-switch table in Decision 1.C is authoritative: local-only = visible
+   to A **and** B; cloud-owned/Story = visible only to its owner.)
+2. **Account-owned Moments after verified upload** — unchanged from §1.2 (`cloud_verified` → account-scoped,
+   hidden from other accounts, no transfer/re-upload on switch). Enforced server-side.
+3. **Account-owned Stories from creation** — Stories are **always** account-owned: a persistent Story is created
+   **only** after authentication and is stamped with the server-verified `story_user_id` at creation. No Story
+   record is persisted pre-auth; client-supplied owner is never trusted for authorization. (Amends §7, Phase 4.)
+4. **Simplified development-only migration** — NO migration-pending state, adoption UI, or framework. A one-time,
+   **dev-only, idempotent, non-destructive** backfill assigns all pre-R1 Stories (and their GeneratedOutputs,
+   edit plans, creative direction, links, music, pending records — i.e. Story-derived state) to the account
+   resolved from `dearlingzhang@gmail.com` via the trusted backend identity mapping (**never** the email as the
+   owner id). Local-only Moments are **left shared** (not assigned). Never overwrite an explicit owner; never in
+   prod/public-beta. (Replaces §8's general back-fill with this designated-account rule.)
+5. **Essential creative metadata sync for beta** (corrects §5.1, which proposed media+ownership+links only) —
+   beta must also sync: stable Story identity, title/description, Moment references + ordering, creative
+   direction, edit plans, generated-version metadata + lineage, music selection, and relevant job/recovery
+   refs. Recomputable AI caches (coverage/guide/music-plan/duration) **may stay local** initially. **Rendered
+   video backup policy (§5.3):** rendered outputs are **NOT** backed up during beta — a recovered Story restores
+   its project state + original media and is **re-rendered on demand**; this is documented as a known limitation
+   and metadata-only restore is never called "complete recovery".
+6. **Strong cloud checksum verification** (hardens §2.1/§2.3) — a multipart S3 **ETag is NOT a full-file
+   SHA256** and must never be treated as one. `cloud_verified` requires: object exists ∧ expected size ∧
+   **verifiable full-file checksum (e.g. S3 `ChecksumSHA256` / composable part checksums, validated against the
+   device-computed sha256)** ∧ object under the caller's own prefix ∧ ownership record durably persisted. An
+   upload response alone never authorizes eviction.
+7. **Reference-safe media deletion** (adds to §2/§5) — distinguish three operations: (a) remove a Moment from a
+   Story (link only), (b) remove a Moment from the Moments Library, (c) permanently delete the cloud original.
+   A cloud original is **never** permanently deleted while another Story depends on it without an explicit
+   dependency-resolution policy.
+8. **Cloud media storage is a core external-beta requirement** — affirmed; already reflected throughout.
+
+**Scope lock:** the immediate implementation is **R1 — Account Ownership & Local Isolation** only. No cloud
+infra, upload, eviction, download, or sync is implemented in R1. Frozen editing contracts unchanged.
 
 ---
 
@@ -287,9 +332,25 @@ to these requires a **separate versioned proposal** (owner STOP gate).
 
 Server becomes authoritative for (per `story_user_id`): media records (§2), and a **metadata mirror** of
 Stories, Moment links, creative direction, edit plans, generated versions, music refs, and generation/job state.
-For beta, the minimum is: **media records + Story/Moment ownership + Story↔Moment links**, enough to (a) enforce
-isolation and (b) restore the library after reinstall. Full creative-metadata sync (coverage/guide/plans) is a
-public-release item; beta can treat those as recomputable/local.
+
+**Beta sync scope (per owner Correction 5 — expanded from the original "media + ownership + links only"):**
+beta synchronizes **essential account-owned creative project state** — stable Story identity; title/description;
+Moment references + ordering; creative direction; edit plans; generated-version **metadata + lineage**; music
+selection; relevant job/recovery refs — **plus** media records + Story/Moment ownership. Recomputable AI
+analysis caches (`StoryCoverageModel`, `StoryGuideModel`, `MusicPlanCacheModel`, `DurationRecCacheModel`) **may
+remain local** initially and be recomputed after recovery. This is enough to (a) enforce isolation, (b) restore
+the creative project after reinstall, and (c) re-render.
+
+### 5.3 Rendered-video backup policy (beta)
+
+**Rendered GeneratedOutput video files are NOT backed up to cloud during beta.** Rationale: originals + the
+exact `editPlanJSON`/music/version lineage ARE synced (§5.1), so a recovered Story is **re-renderable on
+demand** without the baked output. Limitation, documented honestly: after reinstall/device-replacement a
+recovered Story shows its versions' **metadata** and can **re-render** from the restored originals + plan, but
+the previously-rendered MP4 bytes are not restored until re-render. GeneratedOutput cloud backup is a
+**public-release** item (§6). Metadata-only restore is **never** presented as complete recovery when the
+rendered output or a required original is unavailable.
+
 
 ### 5.2 Scenarios
 
@@ -318,13 +379,13 @@ hard unless noted.
 
 | # | Milestone | Est (d) | Depends on | Security / migration risk | Acceptance |
 |---|---|---|---|---|---|
-| R1 | **Account-owned Story creation + local isolation** (owner fields + filtered reads + migrate existing rows to adopting account; fixes trigger bug) | 4–6 | — | Migration: back-fill existing rows to the single adopting account; **must not** cross-assign. Risk: a wrong predicate hides a user's own content. | Two accounts on one device see **disjoint** Stories/Moments; anonymous pre-auth content adopts to first account only; signing out hides nothing destructively. |
+| R1 | **Account-owned Story creation + local isolation** (owner fields + filtered reads + auth-gated creation + **dev-only idempotent backfill of pre-R1 Stories to the designated `dearlingzhang@gmail.com` account**; fixes trigger bug) | 4–6 | — | Migration: dev-only, non-destructive, never overwrites an explicit owner, local-only Moments left shared. Risk: a wrong predicate hides a user's own content. | Two accounts on one device see **disjoint** Stories; **local-only Moments stay visible to both**; pre-R1 Stories appear only under the designated account; new Stories owned by their creator; sign-out destroys nothing. |
 | R2 | **Server-side ownership enforcement** (media + Story/Moment records owner-scoped; edit-plan job store owner-scoped) | 3–5 | R1, auth seam (done) | A missing owner check = cross-account read. Fail closed in prod. | Every media/metadata endpoint rejects access to another `story_user_id` (403); job store rejects cross-owner poll. |
 | R3 | **Cloud media storage infra** (S3 media bucket + DynamoDB media table + IAM + presign endpoints) | 4–6 | — (CDK) | Public-access misconfig; presign scope leak. Provisioning (owner-gated). | Bucket BLOCK_ALL + SSE + SSL-only; presigned URL only under caller's prefix; no object public. |
 | R4 | **Safe async upload** (MediaUploadQueue, multipart, verify, non-blocking capture) | 5–7 | R3 | Interrupted upload corruption; verify bypass. | Capture never blocks on network; upload resumes after suspend/kill; `cloud_verified` only on checksum match. |
 | R5 | **Verified local optimization** (invariant + preview retention + eviction guard) | 4–6 | R4 | **Data loss** if invariant is wrong — highest-severity item. | Never evict without `cloud_verified`; never evict a file held by an active op; Keep-Downloaded pins. |
 | R6 | **On-demand media restoration** (download + pin + no-repeat) | 3–4 | R3, R4 | Download auth/scope; repeated downloads cost. | Cloud-only Moment downloads once, pins for op, re-evictable. |
-| R7 | **Minimum metadata sync** (media records + Story/Moment ownership + links; reinstall restore) | 4–6 | R2, R3 | Metadata-without-media false "recovery". | Reinstall → library shell restores; originals cloud-only until downloaded; honest states. |
+| R7 | **Essential metadata sync** (media records + Story/Moment ownership + links + title/description + creative direction + edit plans + version metadata/lineage + music selection + job/recovery refs; recomputable AI caches stay local; **rendered MP4 not backed up** — §5.3) | 5–7 | R2, R3 | Metadata-without-media/output false "recovery". | Reinstall → project state restores; originals cloud-only until downloaded; Story **re-renderable**; honest states; rendered-output limitation documented. |
 | R8 | **Cloud-only rendering resolution** (resolve→download→pin→render; no quality substitution) | 3–4 | R6 | Final export silently using preview. | Mixed-source Story renders from true originals; export never uses preview. |
 | R9 | **Existing capture/editing regression acceptance** | 3–4 | R1–R8 | Regression in frozen pipeline. | All current device-acceptance scenarios still pass; frozen contracts byte-identical. |
 | R10 | **Server-side beta usage protection + CloudWatch monitoring** (owner-scoped quotas hooks, upload/download/verify metrics + alarms) | 2–3 | R2, R3 | Unmonitored abuse/cost. | Dashboards for upload success/verify/download; alarms on failure spikes + bucket growth. |
@@ -345,16 +406,20 @@ media-intelligence features. **Est: not estimated (research-gated).**
 
 ## 7. Privacy & account-switching rules (the trigger-bug contract)
 
-1. **Every top-level entity has a server-authoritative owner (`story_user_id`); the device mirrors it as
-   `ownerAccountId`.**
-2. **All reads filter by the active owner.** Signed-in account A sees only `ownerAccountId == A` (plus, during
-   adoption, `nil` anonymous content it is about to adopt). Account B on the same device sees only B.
-3. **Switching accounts never uploads, transfers, or duplicates** the other account's Moments to the new
-   account. Ownership is decided server-side; a non-owner simply cannot see or presign the object.
+1. **Stories and uploaded Moments carry a server-authoritative owner (`story_user_id`); the device mirrors it
+   as `ownerAccountId`. Local-only Moments carry NO owner (nil) and belong to the shared device-local library.**
+2. **Reads filter by the active owner, EXCEPT local-only Moments which are always visible.** Signed-in account A
+   sees Stories/uploaded-Moments with `ownerAccountId == A` **plus every local-only Moment (`ownerAccountId ==
+   nil`)**. Account B sees B's owned content **plus the same shared local-only Moments**. (Per owner Correction
+   1 / Decision 1.C — local-only Moments are deliberately shared across accounts on the device.)
+3. **Switching accounts never uploads, transfers, or duplicates** the other account's Stories/owned Moments.
+   Ownership is decided server-side; a non-owner cannot see or presign the object. A local-only Moment is never
+   auto-claimed by switching.
 4. **Signing out destroys nothing** (local media + cloud content survive); it only drops the session and hides
-   owned content until re-auth.
-5. **Anonymous (pre-auth) content** adopts to the **first** account that signs in, exactly once, and is never
-   re-adopted by a second account.
+   owned content until re-auth. Local-only Moments stay visible.
+5. **A persistent Story is created ONLY after authentication** and is stamped with the authenticated
+   `story_user_id` at creation — there is no anonymous Story and no first-account adoption of Stories. Local-only
+   Moments are **never** auto-assigned to any account.
 6. **No enumeration**: cross-account access returns 403/absent, never "exists but denied" in a way that leaks
    another account's data.
 
@@ -363,14 +428,16 @@ media-intelligence features. **Est: not estimated (research-gated).**
 ## 8. Existing-data migration strategy
 
 - **Local**: additive SwiftData fields only (no heavy migration — matches the sandbox constraint and the file's
-  established additive pattern). On first authenticated launch of the new build, a one-time **back-fill** stamps
-  `ownerAccountId` on all existing rows with the **single device `LocalIdentityModel.accountId`** if present,
-  else leaves them `nil` (anonymous, adoptable). **Never** split or cross-assign existing rows between accounts.
-- **The current shared-pool devices** (where A and B both have content): because there is only ever one
-  `LocalIdentityModel.accountId`, back-fill assigns the whole pool to that one adopting account. This is the
-  honest, non-destructive outcome — we cannot retroactively know which account created which pre-fix row. **This
-  must be surfaced to the owner as a known limitation for already-mixed devices** (a clean reinstall gives each
-  tester an isolated store going forward).
+  established additive pattern). **Owner fields default to `nil`** on existing rows.
+- **Dev-only designated-account backfill (owner Correction 4 / Decision 3):** a one-time, idempotent,
+  **development-only** routine assigns **all pre-R1 Stories** (and, transitively, their GeneratedOutputs, edit
+  plans, creative direction, Story↔Moment links, music selection, and pending project records) to the account
+  resolved from **`dearlingzhang@gmail.com`**. The owner id is the backend-resolved **immutable
+  `story_user_id`**, never the email. It **never overwrites** a Story that already has an explicit owner, does
+  **not** touch local-only Moments (they stay shared), does **not** move/duplicate/delete media files, and does
+  **not** run in production or public-beta onboarding.
+- **No migration-pending state, adoption UI, or framework** — there are only two internal testers; the backfill
+  is a single pass guarded by a dev flag + an already-stamped check (idempotent).
 - **Cloud**: nothing to migrate (no cloud media exists yet). First upload is net-new.
 - **No destructive migration** without explicit owner approval (STOP gate).
 
