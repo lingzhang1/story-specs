@@ -176,3 +176,86 @@ enroll/restore + migration + tests): ~4–6 d. Combined two-device acceptance: ~
 No R4-C background uploads, no permanent cloud media deletion, no billing, no production, no CI/CD redesign,
 no frozen editing-contract change (the only contract touched is the NEW `story_doc/1` + the additive
 `media_kind` tag, both proposed here for approval). STOP before provisioning (Gate B needs owner approval).
+
+---
+
+## 9. GATE A CORRECTIONS (owner-accepted 2026-10-20) — AUTHORITATIVE over §1–§8 where they differ
+
+### C1 — Conflict resolution semantics
+"Version" in YoTale means a generated edit WITHIN one Story; a conflict clone is therefore NEVER called
+"Save as Another Version". The 409 recovery offers exactly two persistent choices:
+- **Keep Both Stories** — preserve the local conflicting draft as a SEPARATE Story with a NEW `story_id`
+  (title "… (copy)"), pushed at base_revision 0; the original `story_id` keeps the server document.
+- **Use Cloud Version** — adopt the server document for the original `story_id`, but ONLY after the local
+  conflicting draft has been durably preserved first (as a Keep-Both clone or an on-disk draft snapshot) —
+  never a silent discard.
+No silent overwrite / merge / loss of generated-version lineage. Conflict state is PERSISTED
+(`StorySyncJobModel.conflictState` + the preserved draft) and survives relaunch. No CRDT / version vectors.
+
+### C2 — Complete creative + render provenance (edit-anywhere)
+The doc must carry enough to CONTINUE EDITING a generated version on another device. Per output, persist the
+FULL validated EditPlan (the frozen `edit_plan/2` contract, UNCHANGED) OR a durable immutable reference to it:
+segments {source moment id, source start/end ranges, output duration, speed, transition, native_audio,
+music_alignment}, output format, target duration, music_asset_id. Plus selected soundtrack + music direction,
+generated-output lineage (`source_moment_ids`, `source_fingerprint`), and the revision_context / resolved
+directives that produced it.
+**400 KB DynamoDB audit (REQUIRED before coding the writer):** a Story with many versions × many segments can
+exceed the 400 KB item limit. Policy:
+- The Story doc inlines plans while the SERIALIZED item stays < ~300 KB (safety margin).
+- A plan (or the whole doc) that would exceed it: store the immutable plan snapshot in the EXISTING private S3
+  media bucket as a `media_kind:"edit_plan"` object (content-addressed, checksum-verified, account-scoped
+  key), and the doc carries a durable `{cloud_media_id, sha256}` REFERENCE instead of the inline plan.
+  Retrieved + checksum-verified on restore. Editing-critical fields are NEVER silently omitted — if a plan
+  cannot be inlined it is externalized, not dropped.
+The R7-A writer MUST measure real serialized sizes on representative multi-version Stories and record them.
+
+### C3 — Cloud-only Moment restoration (valid R6 shell)
+A pulled Moment ref creates a LOCAL SHELL that R6 can actually resolve: a MomentModel (stable moment_id) WITH
+its AssetModel relationship (so `moment.asset?.relativePath` exists as the install target),
+`localAvailability=.evicted`, `cloudMediaId` set, `cloudStateRaw="cloud_verified"`, `ownerAccountId`=account,
+caption/source/duration/capturedAt carried. Tested end-to-end: ownership, moment↔asset link, stable id, local
+availability, media type + duration, original-media resolution, playback, Story creation, revision, rendering.
+**A cloud_media_id is NEVER authorization.** The BACKEND verifies every referenced cloud asset (Moment media
+AND output MP4) belongs to the authenticated Story account AND is `cloud_verified` before accepting it into a
+doc / honoring a backup register; a ref to media that is not the account's or not verified is rejected (or the
+doc is marked `incomplete_deps`), and incomplete dependencies are reported accurately (never "fully backed up").
+
+### C4 — Dirty-local protection
+A newer cloud revision NEVER auto-overwrites unsynchronized local edits.
+1. Persistent local `dirty`/pending-sync flag per Story (on `StorySyncJobModel`, survives relaunch).
+2. A CLEAN local record may adopt a newer server revision on pull.
+3. A DIRTY local record facing a newer cloud revision PRESERVES its draft and raises a recoverable conflict
+   (C1) — the pull does not clobber it.
+4. Concurrent edits → recoverable conflict, never silent.
+5. A pending output-backup is never silently discarded by a pull.
+6. Account switch: a stale in-flight sync callback for account A must not mutate account B's visible data
+   (generation/owner guard, like the upload queue's claimGeneration).
+7. Relaunch preserves pending-sync + conflict state.
+8. Sync never blocks local editing (cache-first).
+
+### C5 — Idempotency + crash recovery (no false conflicts)
+A client can lose the response to a SUCCEEDED PUT. Every PUT carries a stable `mutation_id` (client-minted
+UUID, persisted before the request). Server records the last applied `mutation_id` per Story (alongside
+`revision`). On a retry:
+- same `mutation_id` already applied → return the committed `{revision, doc}` as SUCCESS (not a 409),
+- `base_revision` stale AND a DIFFERENT `mutation_id` → genuine concurrent modification → 409,
+- a new local edit after the previous request mints a NEW `mutation_id` at the new base_revision.
+Retries never inflate `revision` and never clone Stories spuriously. (Stored field: `last_mutation_id` (S).)
+
+Schema addendum: the stories item gains `last_mutation_id` (S); the media record gains `media_kind` values
+`original|generated|edit_plan`. `PUT /v1/stories/{id}` body gains `mutation_id`.
+
+---
+
+## 10. Implementation sequence (bounded increments, each its own STOP gate)
+- **R7-A — Backend foundation (THIS increment):** stories table + ownership validation (referenced cloud
+  assets must be the account's AND cloud_verified) + conditional writes + `mutation_id` idempotency +
+  account-scoped index/get + security & conflict tests + DEV-ONLY CDK. **STOP before provisioning; present
+  the exact CDK diff.**
+- **R7-B — Dev backend deploy** via the approved master-only pipeline; verify CRUD/conflict/idempotency/
+  isolation. STOP at backend acceptance.
+- **R7-C — iOS sync:** StorySyncCoordinator + persistent StorySyncJobModel (dirty/conflict/pending, relaunch-
+  safe) + debounced push + foreground/sign-in pull + dirty-local preservation + conflict recovery (Keep Both /
+  Use Cloud Version) + cloud-only Moment shells + existing-Story migration. STOP at device acceptance.
+- **R7-D — Generated MP4 backup/restore** reusing media infra; full provenance; no duplicate AI planning/
+  render. STOP at combined two-device acceptance (12-point final matrix).
