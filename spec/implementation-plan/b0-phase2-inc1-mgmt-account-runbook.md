@@ -119,3 +119,33 @@ AdministratorAccess assumed-role `lingzhang` in the new account), not just conso
 Next bounded increment: a CDK **`org-foundation`** stack (Workloads/Security/Sandbox OUs, SCP
 guardrails, per-account budgets, alternate-contact codification), deployed with the `yotale-mgmt`
 profile — authored and reviewed before any beta/gamma/prod member account is created.
+
+---
+
+## ✅ org-foundation DEPLOYED & verified — 2026-10-21 (via `yotale-mgmt` SSO profile)
+
+CDK stack `yotale-org-foundation` deployed to management account `001188477936` / us-east-1.
+CDKToolkit bootstrapped first (standard S3 bucket + roles). All resources CLI-verified live:
+
+**OUs under root `r-6dce`:**
+- Workloads — `ou-6dce-u19fn3wl`
+- Security — `ou-6dce-57g6g62t`
+- Sandbox — `ou-6dce-rical63w`
+
+**SCPs (custom):**
+- `yotale-region-lock-us-east-1` (`p-njbqhrap`) → attached to **Workloads**
+- `yotale-protect-org-security` (`p-0nmld7v3`) → attached to **Workloads + Sandbox**
+- (pre-existing, outside this stack: `DenyLeaveAndCloseAccount` `p-hf8k7ynx` — additive, harmless)
+
+**Budgets:** `yotale-beta-monthly` $100 · `yotale-gamma-monthly` $50 · `yotale-prod-monthly` $100,
+each ACTUAL-spend alerts at 50/80/100% → `alerts@yotale.ai` (soft alerts, no action attached).
+
+**Still inert:** SCPs only bite once member accounts exist under those OUs; the lone management
+account is unaffected (region-lock is on Workloads, not the root). No member accounts created.
+
+CDK commit: `5441a1d` (app repo). Deploy env: `TMPDIR=/tmp CDK_HOME=/tmp/cdkhome` + `--profile yotale-mgmt`
+(NOTE: do NOT set `HOME=/tmp` for the SSO profile — it hides `~/.aws` and CDK fails with NoCredentials).
+
+### Next increment (separately approved): member accounts
+`organizations.CfnAccount` for beta (then gamma/prod empty-secured), placed in the Workloads OU,
+after beta@/gamma@/prod@ root emails are delivery-verified. Then beta data-plane deploy by digest.
