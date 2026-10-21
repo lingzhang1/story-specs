@@ -120,3 +120,37 @@ Note (latent, separate): `_preservation_violation` builds its `authorized` id se
 affect this case (the target fix removes the drops entirely) and touching it is a frozen revision-policy
 change — a separate versioned proposal if a directive-named clip ever legitimately needs to move/drop at
 a correct target.
+
+## Addendum 2 — revision routing (avoid unnecessary AI replanning) + failure-message separation
+
+After the revise-target fix, the same TMB revise ran at 87.5s (correct) but still dropped 2 clips →
+preservation violation. Phase 0 proof (no Bedrock): `apply_deterministic_revision` on a faithful 85s
+14-clip TMB base plan with the directive (opening=M1, M6 immediately after M1, ending=M2) places the
+order correctly, **drops 0 / adds 0 clips**, and passes the full validator (total 85.0s). So the
+deterministic path fully satisfies the instruction — the model path was the problem.
+
+Root cause: the deterministic revision fast path runs only when `soft_direction` is empty, but a revise
+sent the instruction text as BOTH structured directives AND `soft_direction`, so the path was skipped and
+the model re-planned (dropping 2 clips).
+
+Phase 1 fix (commit `95244dc`, iOS): `InterpretationCoordinator.residualSoftDirection` subtracts the exact
+parsed directive spans (non-naive — not keyword matching) and returns the creative leftover, empty when the
+instruction is fully structural. The deterministic `.ok` branch emits that residual instead of the raw
+text, and `ReviseStorySheet` passes `outcome.softDirection` (not the raw instruction) to the coordinator.
+So a pure-structural revise sends empty `soft_direction` → the engine's deterministic reorder runs and
+preserves every clip. Verified standalone: "Start with Moment 1, then Moment 6, end with Moment 2" →
+residual `''`; "…make it more cinematic" → residual kept; "exclude Moment 4" → `''`. The raw text stays in
+the sheet for display/history.
+
+Phase 2 fix (commit `95244dc`, backend + iOS): a preservation violation no longer wears the
+material-infeasibility "can't fill the target" prefix. `worker.py` re-categorizes `material_infeasible`
+with `last_diagnostics.final == "preservation_violation"` to a distinct `preservation_violation` category
+(mirrors the existing `unsupported_operation` promotion). iOS adds `EditPlanJobFailure.preservationViolation`
+and a distinct `StoryCreationError.preservationViolation` message ("altered clips you didn't ask to change,
+so your current version was kept. Try naming the Moments to keep or move, or use Create Another Version"),
+and routes it to Adjust Instructions, not a plain retry. Worker redeployed (Lambda LastModified
+2026-10-21T05:34Z). Tests: `InterpretationPipelineTests` residual cases; backend `test_edit_planner.py`
+(125) and `test_edit_plan_jobs_api.py` green.
+
+No frozen EditPlan/2, prompt, or validator-semantics change. The `_preservation_violation` authorized-id
+extraction remains a separate latent bug (not needed for this case).
