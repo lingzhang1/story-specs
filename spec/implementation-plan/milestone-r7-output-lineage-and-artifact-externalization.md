@@ -112,3 +112,76 @@ account cannot see the Story). The device Xcode build is the authoritative Swift
 Dev backend + existing CodeBuild/App Runner pipeline only. No prod deploy, no billing, no CI/CD redesign, no
 frozen EditPlan/2 or prompt change, no add-new-Moment-during-revise (deferred P1), no expensive Bedrock jobs,
 no destructive local migration, all existing media/versions preserved.
+
+
+## R7 CLOSEOUT — implementation-complete, PROVISIONALLY ACCEPTED (owner, 2026-10-21)
+
+Owner decision: close R7 for the current development stage. The **primary-device workflow is accepted**. Full
+two-device synchronization testing is **deferred to controlled beta**. R7 is recorded as implementation-complete
+and provisionally accepted, with physical A→B acceptance OUTSTANDING.
+
+### Cross-device sync divergence — root-caused + fixed (commit `4e70ca4`)
+
+A two-device test showed Device B diverging (different plans, missing generated videos, a new story on A not
+appearing on B). Root-caused from backend + App Runner logs (same binary + same account confirmed — NOT a stale
+build): 14 story docs under one owner; a new story was PUT by A but never GET by B. Two coordinator bugs:
+- **Silent last-writer-wins:** `pull` stamped `job.lastSyncedHash` with the WIRE doc hash while `syncAllDirty`
+  compares the LOCAL re-encode hash; decode→encode is not byte-identical, so every cleanly-pulled story looked
+  dirty and the device pushed its thinner re-encode back over the other device's richer plans/outputs. Fix:
+  stamp `lastSyncedHash` with the local re-encode of the adopted story (pull + conflict-adopt).
+- **New story never adopted:** `StoryApp` ran `pull` and `syncAllDirty` as concurrent Tasks on one
+  `mainContext`, racing the sync-job rows so the new story's adopt was lost. Fix: `reconcile()` runs pull fully
+  THEN push, serialized; both StoryApp sites use it.
+- `buildIdentifier` → `r7-sync-reconcile-2` for device build-id proof. Tests: pulled-story-not-repushed,
+  reconcile-adopts-new-story-with-dirty. Client-only; no backend redeploy.
+
+### Outstanding two-device (A→B) acceptance checks (deferred to beta)
+
+1. Identical Story metadata and Moment ordering.
+2. Identical Guide, Coverage, and Moment Understanding (AU).
+3. GeneratedOutput versions and lineage present.
+4. Exact validated EditPlan restoration (no re-plan).
+5. Generated-MP4 restoration and playback through R6.
+6. Zero unnecessary Bedrock inference during restoration.
+7. Account isolation (another account cannot see the Story) and conflict recovery (Keep Both / Use Cloud).
+
+Note on already-clobbered cloud docs: the pre-fix thrash left some docs holding Device B's thin copy. The fix
+stops new clobbering; recovering an already-overwritten doc requires the device holding the rich local copy to
+re-push it (a user edit, or a one-time forced re-push). Flagged for the beta acceptance run.
+
+### Implementation commits (branch `feat/r1-account-ownership-isolation`, all preserved)
+
+- `81bac08` R7-C fix — materialize GeneratedOutput version lineage on pull.
+- `e90ea13` R7 Phase 4 — ai_artifact externalization for oversized EditPlans.
+- `4e70ca4` R7 cross-device fix — stop Device B clobbering Device A + adopt new stories.
+- (on the same branch earlier: R7-D `9d750ed`, R7 cloud-aware eligibility `7757fe4`, directive/customize work.)
+
+### Branch ↔ master reconciliation (recorded, not merged — minimal/safe)
+
+`feat/r1-account-ownership-isolation` is **59 ahead / 8 behind** `origin/master` (merge-base `102f96f`). The 8
+"behind" commits are R7 backend PRs **#9–#16** (identity `/v1/me`, R2/R3 media ownership, R4-B multipart,
+presign + checksum fixes, R6 download authority, R7 story sync, R7-E understanding) — the SAME features the
+feature branch developed independently, so their code already exists in the branch's tree. A merge of master
+into the branch conflicts across ~12 core backend files (both lines edited the same R7 code); a rebase would
+rewrite 59 commits. Per the owner's "minimal closeout / avoid unrelated changes / no CI-CD investigation", the
+reconciliation is RECORDED here and the actual merge is deferred to the normal PR-to-master workflow for this
+branch rather than performed as a risky in-place history rewrite now. All R7 commits are preserved on the
+branch. Nothing is pushed to the protected master.
+
+### Exact running dev artifacts (recorded 2026-10-21)
+
+- **App Runner** `story-development-api` (service `23daa77a2b654ab6b466420624b8b9ae`): RUNNING, image
+  `story-development-api:latest`, **digest `sha256:ac958673b29ac6ab1c5bf53718bf5f80bdf25228e2cd84cee3a9b00a2d228b6a`**,
+  pushed 2026-10-21T00:15:06-07:00. `/health` 200.
+- **Worker** `story-development-edit-plan-worker` Lambda: PackageType Zip, Runtime python3.12, Handler
+  `app.worker.handler`, **CodeSha256 `gD3z8kM9JGZJRk4jaLk4bdGRnlP+toZVUfhDrbp2QFs=`**, LastModified
+  2026-10-21T05:34:29Z.
+
+### Manual CodeBuild deployment deviation (documented, NOT redesigned)
+
+The R7 backend was deployed to dev OUT OF BAND of the PR-merge pipeline: `git archive HEAD` + an injected ROOT
+`buildspec.yml` (referencing `$ECR_URI`; the committed `infrastructure/cdk/buildspec.yml` uses unset
+`$ACCOUNT/$REPO_NAME`) + `prompts/` → uploaded to `s3://story-codebuild-src-989088054552-us-east-1/rb-caseg/source.zip`
+→ CodeBuild `story-rb-caseg-build` → App Runner forced `start-deployment`. This was a deliberate dev-iteration
+shortcut to test unmerged R7 backend changes, not the sanctioned path (PR → master → pipeline). Recorded as a
+known deviation; CI/CD redesign is explicitly out of scope and NOT performed.
