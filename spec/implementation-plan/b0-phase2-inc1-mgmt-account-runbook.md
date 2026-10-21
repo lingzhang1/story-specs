@@ -149,3 +149,27 @@ CDK commit: `5441a1d` (app repo). Deploy env: `TMPDIR=/tmp CDK_HOME=/tmp/cdkhome
 ### Next increment (separately approved): member accounts
 `organizations.CfnAccount` for beta (then gamma/prod empty-secured), placed in the Workloads OU,
 after beta@/gamma@/prod@ root emails are delivery-verified. Then beta data-plane deploy by digest.
+
+---
+
+## ✅ Beta member account CREATED — 2026-10-21 (via `yotale-mgmt`)
+
+- `organizations create-account` (request `car-2db2c6880cf140dea9bfdd5b6ff8feec`) → **SUCCEEDED**.
+- **Beta account `224033508028`** ("YoTale-Beta", root `beta@yotale.ai`), Status ACTIVE.
+- Moved from root into **Workloads OU** (`ou-6dce-u19fn3wl`), so the region-lock + protect-security
+  SCPs apply by inheritance. (SCPs enabled at root; `list-policies-for-target` on an ACCOUNT shows
+  only directly-attached `FullAWSAccess` — inherited SCPs are not listed there, which is expected;
+  they are attached at the OU and in force.)
+- No gamma/prod accounts yet (owner may keep them deferred until needed).
+- No workloads deployed into beta yet.
+
+### Access to the beta account
+`create-account` makes an `OrganizationAccountAccessRole` (AdministratorAccess, trusts the management
+account) in the new account. To let the `yotale-mgmt` admin operate beta: either assume that role, or
+(cleaner) add an IAM Identity Center permission-set assignment for `lingzhang` → YoTale-Beta. CDK
+bootstrap of the beta account for the data-plane deploy will be done next increment.
+
+### Next increment: beta data-plane (separately staged)
+Cognito (own-account SES identity, DEVELOPER mode), identity/ownership tables, Story+Understanding
+stores, private media S3, API+worker by DIGEST (no :latest), SQS/DLQ, basic CloudWatch, beta cost
+safeguards. No dev data copied.
