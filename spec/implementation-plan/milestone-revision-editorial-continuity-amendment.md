@@ -187,3 +187,40 @@ owner instruction: **STOP here for owner architecture approval before any implem
 approved, Phase 7 regression tests (reorder/retime 0-Bedrock; mixed uses AI; newer-intent-overrides; add/remove
 when necessary; no wholesale replacement; Explore diversity intact; the 166s TMB
 *"Start with Moment 1, shorten each clip to ~5s, make it more cinematic"* acceptance) run before the device gate.
+
+---
+
+## Implementation — Phases 1-6 + Phase 7 tests (owner-approved 2026-10-21) [committed, NOT deployed]
+
+App commit `7c2c126` on `feat/r1-account-ownership-isolation`. Backend-only; `edit_plan/5.2` system body +
+EditPlan/2 schema UNTOUCHED; no wire-field change. iOS unchanged.
+
+**`packages/edit_planner/__init__.py`:**
+- `_preservation_violation` → replaced by `_continuity_assessment` (graded dict verdict `ok`|`noop`|`wholesale`
+  + continuity_ratio + added/removed/reordered) and `_directive_authorized_ids` (D5 fix — reads the directive
+  DICT: opening/ending/must_include/exclude/order_after/order_adjacent, lowercased; the old code iterated it as
+  a list of dicts so `authorized` was always empty). `CONTINUITY_FLOOR = 0.5`.
+- `generate()` gate 6a: the terminal preservation raise is replaced by the graded gate — a valid revise is
+  ACCEPTED even when the clip set changed; rejected ONLY on `noop` (no effective edit) or `wholesale`
+  (continuity < floor AND the instruction authorized no selection change). `diag["continuity"]` is always
+  recorded (Phase 6 signal).
+- `_revision_context_block` revise branch (D1): injects the EXACT `base_plan` JSON + a "REVISE the existing
+  edit / preserve unaffected / LATEST request wins / do not re-cut for novelty" objective into the USER
+  message; Explore's `prior_edit_summaries` are no longer rendered for revise.
+- Phase 5: new `_has_retime_intent` relaxes the AI-recommended undershoot floor for a retime/shorter revise
+  EVEN WHEN a structural directive is also present (previously only a directive-free timing-only revise), so a
+  mixed "open with Moment 1 + shorten each clip" revise may legitimately shorten the total instead of padding
+  with new clips to hold the inherited duration. `_is_timing_only_revise` (gate for the 0-model deterministic
+  retime fast path) is unchanged.
+
+**`apps/api/tests/test_edit_planner.py`:** updated the re-pick test to the wholesale semantics; +7 Phase-7
+tests (accept-within-floor, reject-noop, shorter-authorizes-drop, `_directive_authorized_ids` D5 unit,
+base-plan-injected-for-revise, explore-block-unchanged, TMB mixed-retime acceptance).
+
+**Verification:** `apps/api/tests` **360 pass** (was 355). The exact TMB instruction verified end-to-end against
+the engine: `final=executable`, continuity `ok` ratio 1.0, opens with Moment 1, 85s → 30s (shorter allowed),
+all clips preserved, ~5s each. Deterministic fast paths (reorder/retime/change-music 0-Bedrock) and Explore's
+diversity objective unchanged (Phase-7 items 1, 2, 8, 9 covered by existing + new tests).
+
+**STOP — awaiting owner approval to deploy** (CodeBuild → App Runner API + CDK worker) and device acceptance on
+the real 166s TMB. Nothing pushed/deployed.
