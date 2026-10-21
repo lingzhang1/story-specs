@@ -69,16 +69,22 @@ Route 53 or careful MX coexistence. Revisit SES-receipt/Workmail only if shared 
 
 ### Exact DNS changes to make in Namecheap (apply only after approval — SHOWN, not applied)
 
-ADD (apex receiving — Namecheap Email Forwarding auto-manages these when forwarding is enabled; values shown
-for verification):
+PROCEDURE: in Namecheap → Domain List → Manage `yotale.ai` → **Advanced DNS → Mail Settings**, select
+**"Email Forwarding"**. Namecheap then writes the MX records **AUTOMATICALLY** — you do NOT hand-enter MX
+values. (Confirmed against Namecheap's official article + live DNS.) The auto-written records are:
 ```
-Type  Host  Value                              Priority  TTL
-MX    @     mx1.privateemail.com               10        Automatic   # (Namecheap forwarding MX)
-MX    @     mx2.privateemail.com               10        Automatic
-TXT   @     v=spf1 include:spf.efwd.registrar-servers.com ~all   Automatic   # apex SPF for forwarding
+Type  Host  Value                              Priority  TTL        (VERIFIED LIVE 2026-10-21)
+MX    @     eforward1.registrar-servers.com    10        Automatic
+MX    @     eforward2.registrar-servers.com    10        Automatic
+MX    @     eforward3.registrar-servers.com    10        Automatic
+MX    @     eforward4.registrar-servers.com    10        Automatic
+MX    @     eforward5.registrar-servers.com    10        Automatic
+TXT   @     v=spf1 include:spf.efwd.registrar-servers.com ~all        # apex SPF for forwarding (NEW; none today)
 ```
-NOTE: the exact forwarding MX hostnames are shown by Namecheap when Email Forwarding is toggled on; the two
-above are Namecheap's current forwarding endpoints — confirm in the dashboard before saving.
+CORRECTION (owner item 1): an earlier draft guessed `mx1/mx2.privateemail.com` — that is WRONG. `privateemail.com`
+is Namecheap's PAID **Private Email** product (distinct IPs `162.255.118.7/.8`). FREE Email Forwarding uses
+`eforward1-5.registrar-servers.com` (all resolve to `162.255.118.51/52`), auto-written by the Mail-Settings
+toggle. Verified by live `dig` + the Namecheap KB, not assumed.
 
 DO NOT TOUCH (sending — leave exactly as-is, verified live):
 ```
@@ -161,8 +167,18 @@ Deploy the SAME CDK (`story-<env>-api` + `story-<env>-auth`) into the **beta acc
 - Cognito user pool (beta) + account-ownership/identity tables (fresh, empty).
 - `story-beta-stories` / `-understanding` / `-media` (private S3, no public access) / `-edit-plan-jobs(+dlq)`.
 - App Runner `story-beta-api` + Lambda `story-beta-edit-plan-worker` (digest/hash-pinned).
-- SES sending reused from the verified `yotale.ai` identity (add a beta Cognito-send policy scoped to the
-  beta user pool ARN — mirrors the dev policy); OTP works day one.
+- **SES in the BETA account (item 5 — Cognito↔SES is SAME-ACCOUNT ONLY).** AWS does NOT support Cognito→SES
+  cross-account, so beta Cognito CANNOT reuse the dev account's `yotale.ai` SES identity. Beta must have its
+  OWN SES identity, same region (us-east-1): verify a **`beta.yotale.ai` subdomain** (recommended — isolates
+  beta sending reputation and avoids colliding with the dev account's apex identity) OR re-verify `yotale.ai`
+  in the beta account. Steps: (a) create the SES domain identity in the beta account → it issues 3 NEW DKIM
+  CNAMEs + a MAIL FROM; (b) add those records at Namecheap (additive — they do NOT touch the dev account's
+  existing sending records); (c) set the beta user pool `EmailConfiguration` to `EmailSendingAccount=DEVELOPER`
+  with `SourceArn` = the beta-account SES identity ARN; (d) attach a Cognito-send authorization policy on the
+  beta SES identity scoped to the beta user-pool ARN + beta account id (mirrors the dev policy, but in-account).
+  Until the beta SES identity leaves the SES sandbox, OTP works only to verified recipients — request
+  production access for the beta account before external beta testers. OTP works day one for the owner's own
+  verified address.
 - Secrets/config via SSM Parameter Store / Secrets Manager in the beta account (no secrets in the image).
 - Basic CloudWatch: the free SQS/Lambda/App Runner/DynamoDB metrics + a beta budget alarm. (The full
   observability milestone — the approved next milestone — layers EMF metrics/dashboards/alarms on top.)
@@ -206,4 +222,48 @@ Deploy the SAME CDK (`story-<env>-api` + `story-<env>-auth`) into the **beta acc
 
 Approve these and I will execute in bounded increments: Phase 1 DNS/forwarding + verification → Org/accounts →
 beta bootstrap + deploy → smoke/security acceptance. The next milestone after beta acceptance is the existing
+
+---
+
+## OWNER DECISIONS LOCKED (2026-10-21)
+
+- **Path A chosen:** create a NEW dedicated YoTale AWS Organization with a **workload-free management
+  account**. Leave `989088054552` and org `o-hwquoahv3t` UNTOUCHED. Do NOT migrate YoTale dev; do NOT modify
+  Ainigama. All current dev workloads preserved.
+- **Root emails approved:** aws@ (management), beta@, gamma@, prod@ `yotale.ai`.
+- **Forwarding:** one secure admin forwarding destination initially — **PENDING owner confirmation of the
+  actual destination inbox** (the one value that gates starting the email setup).
+- **Budgets (alert thresholds, NOT hard caps), alerts at 50/80/100%:** Beta **$100/mo**, Gamma **$50/mo**,
+  Production **$100/mo**. No public production traffic authorized.
+- **Region:** us-east-1 for application workloads; explicit exceptions for global AWS services (IAM,
+  Organizations, CloudFront, Route 53, billing) and required security infrastructure.
+
+### Pre-provisioning verification (owner items 1–6) — status
+
+1. **Namecheap forwarding MX — VERIFIED (corrected):** free Email Forwarding = `eforward1-5.registrar-servers.com`
+   (live `162.255.118.51/52`), auto-written by the Advanced-DNS → Mail-Settings → "Email Forwarding" toggle;
+   apex SPF `v=spf1 include:spf.efwd.registrar-servers.com ~all`. NOT `privateemail.com` (that is the paid
+   Private Email product). Confirmed by Namecheap KB + live `dig`.
+2. **Preserve sending — VERIFIED present + untouched:** `yotale.ai` SES verified, DKIM (3 CNAMEs live), MAIL
+   FROM `mail.yotale.ai`, apex DMARC `p=none`, Cognito OTP policy on `us-east-1_AzfHOEdA5`. The forwarding
+   change is apex-MX + apex-SPF only; it touches NONE of these. (SES MAIL FROM uses the `mail.` subdomain MX,
+   no apex collision.)
+3. **Inbound verification — PLANNED gate:** after forwarding is enabled, send a test to each of aws@/beta@/
+   gamma@/prod@ (and aws-security@/aws-billing@/alerts@) and confirm receipt BEFORE any account creation.
+4. **Standalone management-account creation — CONFIRMED procedure:** sign up a brand-new standalone AWS
+   account at the AWS sign-up page with root email `aws@yotale.ai` (needs a payment method + verified contact);
+   from that account enable AWS Organizations (CreateOrganization, FeatureSet=ALL) → it becomes the management
+   account; keep it workload-free; create beta/gamma/prod as member accounts inside the org (each with its own
+   root email). This is a SEPARATE org from `o-hwquoahv3t`.
+5. **Beta Cognito→SES — CONFIRMED design (same-account only):** Cognito cannot use SES cross-account, so beta
+   gets its OWN SES identity in the beta account/us-east-1 (recommended `beta.yotale.ai` subdomain → new DKIM
+   CNAMEs added at Namecheap, additive), user pool `EmailSendingAccount=DEVELOPER` + `SourceArn` = beta SES
+   identity, + an in-account Cognito-send policy; request SES production access before external testers.
+6. **Preserve dev account + workloads — HONORED:** nothing in this plan creates, modifies, or deletes anything
+   in `989088054552`; the new org/accounts are entirely separate.
+
+### Next action (single blocker)
+Awaiting the **forwarding destination inbox**. On confirmation: enable Namecheap Email Forwarding + add apex
+MX/SPF (sending records untouched), configure the 7 forwards, and verify inbound to every address. Only after
+all verifications + security checks pass do I create AWS accounts (management first, then beta).
 CloudWatch observability + Bedrock cost-accounting implementation.
