@@ -82,3 +82,40 @@ alternate contacts, root MFA, and that `989088054552`/`o-hwquoahv3t`/dev/Ainigam
 - Draft SCP guardrails (region lock us-east-1 + exceptions; deny leaving org; protect security infra).
 - Per-account budgets ($100/$50/$100 @ 50/80/100%).
 - Owner go for member-account creation.
+
+---
+
+## ✅ VERIFIED COMPLETE — 2026-10-21 (CLI-confirmed via `yotale-mgmt` SSO profile)
+
+Increment 1 done. All facts below confirmed directly through the agent's read access (SSO
+AdministratorAccess assumed-role `lingzhang` in the new account), not just console screenshots.
+
+**New management account & org**
+- Management account: **`001188477936`** ("YoTale-Management"), root email `aws@yotale.ai`, status ACTIVE.
+- New Organization: **`o-iqahcgt2wz`**, FeatureSet **ALL**, SERVICE_CONTROL_POLICY ENABLED, **1 account only** (workload-free).
+- Distinct from the dev org — no relationship to `o-hwquoahv3t`.
+
+**IAM Identity Center**
+- Instance **`ssoins-72230ef1c7ef0e6a`**, Identity Store **`d-906662fd13`**, status ACTIVE, us-east-1.
+- Access portal: `https://d-906662fd13.awsapps.com/start` (owner's daily sign-in; stop using root).
+- User `lingzhang` assigned to the management account via permission set **`ps-722337e8e555d2d5`** (`AdministratorAccess`). PrincipalType=USER confirmed.
+
+**Alternate contacts** (set by agent via `account put-alternate-contact`, read back OK):
+- BILLING → `aws-billing@yotale.ai`
+- SECURITY → `aws-security@yotale.ai`
+- OPERATIONS → `alerts@yotale.ai`
+- NOTE: phone set to placeholder `+10000000000` (API requires a value; AWS does not verify it). Owner may replace with a real number in Account → Alternate contacts.
+
+**Non-interference proven**
+- Dev org `o-hwquoahv3t` / account `989088054552` still FeatureSet=ALL, **still exactly 1 account**, master email `dearlingzhang@gmail.com` — untouched. Ainigama/Story dev workloads not modified.
+
+**Owner-side items still manual (cannot verify via API — confirm in console):**
+- Root user MFA enabled on `001188477936`.
+- The earlier IAM user `Admin` (console access, no MFA) — add MFA or delete it (superseded by the IdC user).
+
+**Cost:** $0 recurring (management account base, Organizations, Identity Center, IAM all free; ~$1 refundable signup auth).
+
+## STOP — awaiting owner review before next increment
+Next bounded increment: a CDK **`org-foundation`** stack (Workloads/Security/Sandbox OUs, SCP
+guardrails, per-account budgets, alternate-contact codification), deployed with the `yotale-mgmt`
+profile — authored and reviewed before any beta/gamma/prod member account is created.
