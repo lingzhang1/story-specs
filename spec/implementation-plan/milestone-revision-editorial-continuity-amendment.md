@@ -224,3 +224,13 @@ diversity objective unchanged (Phase-7 items 1, 2, 8, 9 covered by existing + ne
 
 **STOP — awaiting owner approval to deploy** (CodeBuild → App Runner API + CDK worker) and device acceptance on
 the real 166s TMB. Nothing pushed/deployed.
+
+## Device acceptance (2026-10-21) — ACCEPTED
+
+Owner rebuilt `feat/r1-account-ownership-isolation` and revised the 166s TMB with *"Start with Moment 1, shorten
+each clip to ~5s, make the video more cinematic"*. Worker job `2773cb98` (backend live, API+worker dev):
+`mode=revise`, `directive_keys=["opening"]`, **`opening_honored=true`** (seg0 = opening Moment), `model_calls=1`,
+`first_pass_executable=true`, `repairs=0`, `revision_path=null` (AI path), `dur_src=ai_recommended` — **no
+preservation_violation, no retime_reject**. The graded continuity gate ACCEPTED the shorter, Moment-1-opening,
+all-clips-preserved revise instead of discarding it. Milestone COMPLETE + device-accepted. Not merged to master
+(PR workflow); not a production deploy.
