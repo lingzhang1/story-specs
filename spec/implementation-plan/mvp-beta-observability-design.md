@@ -289,3 +289,54 @@ B0; dev acceptance (safe fault injection) runs per the Phase-6 matrix once a des
 Isolated worktree/branch; no B0/worktree edits; no AWS account/DNS/SES/OIDC changes; nothing deployed; no
 Bedrock load test; frozen EditPlan/2 + prompts untouched; unrelated uncommitted work preserved; env-
 parameterized + opt-in.
+
+
+---
+
+## Increment A — Final integration-readiness review (2026-10-21)
+
+**Owner decision:** Increment A accepted as code-complete and locally tested; NOT deployed. Beta account is
+being provisioned by the separate B0 workstream. The bounded final review below was performed on branch
+`feat/observability-completion` (worktree `story-wt-observability`); hardening committed as `5580441` on
+top of `743a49b`. Python **453 pass**, CDK jest **37 pass**. Frozen EditPlan/2 + prompts untouched.
+
+1. **Trusted per-user Bedrock attribution (privacy-safe, no high-cardinality dim).** The worker now emits a
+   `bedrock_usage` structured LOG line carrying the TRUSTED backend-minted `story_user_id` (from the job
+   row's `owner`, never client-supplied) + model_calls / in-out tokens / fallback / `estimated_cost_usd` /
+   `pricing_version` / `pricing_known`. It is a LOG field, NOT a metric dimension — the EMF allow-list
+   (`env,service,op_type,stage,error_category,model_id,reason`) would drop it, keeping metric cardinality
+   bounded. Per-user cost is reconstructed via Logs Insights. `scrub_log_fields` guarantees no
+   instruction/gps/token field rides along; `story_user_id` is an opaque id, not PII, and survives scrubbing.
+2. **Unknown pricing ≠ zero cost.** New `price_lookup()` returns `(cost, priced)`; an unmatched model_id
+   yields `priced=False` (cost 0.0 is an accounting GAP) distinct from a genuine zero-token attempt
+   (`priced=True`, cost 0.0). Surfaced as the `MissingModelPricing` metric + an AI-dashboard widget so the
+   gap is visible/alarmable. `estimated_cost_usd` kept backward-compatible.
+3. **Cost covers all physical attempts.** Engine accumulates `input_tokens`/`output_tokens` with `+=` across
+   every call incl. the 2 executability repairs and the Sonnet fallback (edit_planner `__init__.py`
+   ~1473/1510); `ModelInvocations` counts physical calls (retries never free, never merged); the billed
+   model is the FALLBACK when one fired. Repairs/critiques/fallbacks each emitted as their own metric.
+4. **Merge-clean after PR #17.** `origin/master` (c7e4b0a, the PR-#17 merge) is a direct ANCESTOR of the
+   branch — zero divergence, no conflict surface. B0 touches AWS accounts/DNS/SES/OIDC only, none of the 7
+   changed code/CDK files, so no file-level conflict with B0 either.
+5. **B0 budget reconciliation.** The AWS Budget is GATED on `-c createBudget=true` (default FALSE), so this
+   stack never DUPLICATES B0's account-level budget. Alarms/dashboards/SNS are independent of that flag; the
+   `abnormal-model-cost` CloudWatch alarm (independent of AWS Budgets) still pages on cost when B0 owns the
+   budget.
+6. **SNS destination.** Default `alerts@yotale.ai` (req), subject to VERIFIED email forwarding before it
+   receives alarms/budget notices. Overridable via `-c alarmDestination=`.
+7. **Beta budget.** `$100`/month default in beta, ACTUAL-spend alerts at **50 / 80 / 100%** (asserted in the
+   CDK test).
+
+**Req 8 — iOS time-to-playable & Auth/Quota metrics NOT yet wired (data sources absent):**
+- `TimeToPlayableVideo` (p50/p95), `GenerationCancelled`, `GenerationRecovered`, `DuplicateInferencePrevented`
+  — dashboard widgets exist but **no backend emitter and no `/v1/telemetry` client-ingest endpoint** exists.
+  Requires: an authenticated client-telemetry endpoint + iOS MediaEngineV1 timing. Separate increment.
+- `AuthFailures`, `AuthorizationDenials`, `QuotaConsumed`, `QuotaDenials`, `RateLimitDenials`, `ActiveUsers`,
+  `GenerationsPerUserDay`, `QuotaEnforcementError` — Dashboard 4 + the `quota-enforcement-error` /
+  `unauthorized-access-anomaly` alarms are SCHEMA-ONLY; they populate with the **auth/quota milestone** (no
+  principal/quota surface exists yet). Alarms safely stay in INSUFFICIENT_DATA (treatMissingData set).
+
+**STOP gate preserved:** no infra provisioned, no deploy, no B0/DNS/SES/OIDC/CI-CD change, no Bedrock load
+test, unrelated uncommitted work preserved. After B0 beta infra is accepted → protected merge → deploy via
+the approved immutable beta pipeline with `-c observability=true -c alarmDestination=alerts@yotale.ai`
+(+`-c createBudget=true` only if B0 does not own the account budget).
