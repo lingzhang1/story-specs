@@ -229,3 +229,63 @@ Owner approved dev implementation in reviewable increments; dev-only provisionin
 **Dev provisioning dependency:** alarm-notification acceptance (#7) needs the owner's SNS destination
 (email or Slack webhook). Everything else (EMF metrics, dashboards, alarm definitions, token-cost
 surfacing, iOS endpoint) is built + dev-provisioned without it; the SNS subscription is the one value to fill.
+
+---
+
+## Implementation checkpoint — feat/observability-completion (2026-10-21) [committed, NOT deployed]
+
+Worktree `story-wt-observability`, branch `feat/observability-completion` off master `c7e4b0a`, app commit
+`743a49b`. STOP gate honored: code + CDK definitions + tests only, **nothing provisioned/deployed**. Frozen
+EditPlan/2 + prompts untouched; `enableObservability` defaults OFF so a plain synth/deploy is byte-unchanged.
+
+### Phase 0 — what already existed (reused, not redesigned)
+`packages/observability` already had the EMF emitter (`emit_metrics`, dimension allow-list), `estimated_cost_usd`,
+and worker wiring (commit `9d7ca94`) emitting ModelInvocations/InputTokens/OutputTokens/RepairCount/
+CritiqueCount/ModelFallbacks/EstimatedModelCostUSD + GenerationCompleted, plus GenerationFailed/
+BedrockThrottles by error_category. CDK dashboards/alarms/SNS/budget were entirely absent.
+
+### Phase 1 — Bedrock cost accounting (completed)
+Physical invocation count, in/out tokens, model_id + stage dims, repair + critique counts, fallback-model
+metric (already emitted; retained). **Versioned pricing:** added PRICING_VERSION="beta-pricing/2026-10-21",
+surfaced on the worker diag line so a cost figure is traceable. estimated_cost_usd sums ALL billable attempts
+(fallback + repair + multimodal via reported input tokens); unknown model -> 0.0, labeled estimate. Retries are
+NOT free and physical calls are NOT merged.
+
+### Phase 2 — generation + client telemetry (completed backend; client schema reserved)
+Queue-wait separated from worker-exec: new QueueWaitMs (from the FREE SQS SentTimestamp — no API send-path
+change) + WorkerProcessingMs; GenerationStarted added for rate denominators. Validator error categories already
+on GenerationFailed. PII scrub: new scrub_log_fields() redacts instruction/soft_direction/gps/credential/
+contact_sheet/email keys, keeps token counts. Client TimeToPlayableVideo/cancellation/recovery shown as a
+DISTINCT client series on the dashboards; /v1/telemetry ingest + auth hardening reserved for the auth milestone.
+
+### Phase 3 — CloudWatch IaC (completed, opt-in, env-parameterized)
+New infrastructure/cdk/lib/observability.ts, instantiated only on `-c observability=true`. Names story-<env>-*
+(development|beta|gamma|production). 4 dashboards (Product & Generation Health; AI Usage/Latency/Throttling/
+Cost; Infra & Async Queue Health — mostly free metrics; Auth/Quota/Beta reserved); 10 alarms -> one SNS topic
+(DLQ non-empty, queue age, Lambda errors, Lambda p99 duration, App Runner 5xx, generation-failure-rate with a
+>=5-starts min-sample guard, Bedrock sustained throttling, quota-enforcement-error distinct from a normal
+denial, abnormal daily cost, unauthorized-access anomaly; explicit treatMissingData, multi-datapoint windows);
+SNS topic + optional email/https subscription; AWS Budget (monthly 50/80/100% actual-spend) when an email is
+given; explicit log retention 30d dev / 60d beta / 90d gamma+prod.
+
+### Phase 4 — tests (all green)
+Python apps/api + packages **450 pass** (incl. new PII-scrub + pricing-version tests). CDK **jest 35 pass**
+(30 pre-existing + 5 new: off-by-default = 0 resources; enabled = 4 dashboards / 10 alarms / 1 topic, every
+alarm has an SNS action; DLQ alarm config + treatMissingData; email -> SNS subscription + Budget w/ 3
+thresholds; env-parameterized names). `cdk synth -c observability=true` succeeds (16 observability resources).
+
+### Expected CloudWatch cost (beta scale)
+Bounded EMF catalog (~15-20 metrics x a few dims) ~$0.30/metric/mo; 4 dashboards ~$3/mo each; 10 alarms ~$0.10
+each; modest Logs ingestion + retention. Rough **< ~$30-50/mo at beta scale**. Free AWS service metrics add $0.
+
+### Remaining beta-account dependencies & deploy plan
+Owner-supplied: SNS alarm destination (email or Slack webhook) + monthly budget number. Auth-milestone-gated:
+the Auth/Quota dashboard + auth/quota/active-user metrics + /v1/telemetry client ingest. Deploy (after B0 beta
+infra accepted): `cdk deploy story-<env>-api -c observability=true -c alarmDestination=<owner>
+-c monthlyBudgetUsd=<n>` through the approved beta pipeline; do NOT merge to master without coordinating with
+B0; dev acceptance (safe fault injection) runs per the Phase-6 matrix once a destination is set.
+
+### Parallel-work safeguards honored
+Isolated worktree/branch; no B0/worktree edits; no AWS account/DNS/SES/OIDC changes; nothing deployed; no
+Bedrock load test; frozen EditPlan/2 + prompts untouched; unrelated uncommitted work preserved; env-
+parameterized + opt-in.
