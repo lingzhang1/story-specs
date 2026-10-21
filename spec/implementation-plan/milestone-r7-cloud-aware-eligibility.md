@@ -93,3 +93,30 @@ the SwiftData macro plugin), so these run on device.
 
 - A referenced Moment with no synced AU still blocks honestly until AU hydrates (expected).
 - Deterministic *add-new-segment* revision (vs reorder/prune) is Phase 3, gated.
+
+## Addendum — the real cause of "9 clips you did not ask to remove were dropped"
+
+After the cloud-aware fix landed, the same TMB revise ("Start with Moment 1, then Moment 6, end with
+Moment 2") failed with a NEW error. Worker diag `7928e215`: `usable_moment_count: 14` (the regression
+IS fixed — all Moments reach the planner), `terminal: preservation_violation`, `repairs_used: 0`,
+`final_error_codes: []`. The plan was structurally valid but dropped 9 base clips.
+
+Root cause (NOT a policy question): the revise ran at **target 16.5s** while the base video is **85s**.
+`StoryResultView.startRevise` passed no `targetSeconds`, so `EditPlanRequestBuilder.build()` fell back
+to `story.intentTargetDurationSeconds` — a stale 16.5s left from earlier testing (the live doc now shows
+it null, but at failure time it was 16.5). Honoring opening+adjacency+ending at 16.5s forced the planner
+to keep only a few clips and drop ~9; the preservation backstop then **correctly** rejected the silent
+loss. The backstop was right; the target was wrong.
+
+Fix (commit `b3084be`, iOS-only): `startRevise` derives the revise target from the base executable plan's
+`target_duration_seconds` (authoritative), falling back to the rendered `durationSeconds`, and passes it
+to `reviseVersion`. A revise edits the existing ~85s video; it never invents a new length. At 85s every
+base clip fits, so a reorder-only directive applies without dropping anything. Tests:
+`StoryResultFlowTests.test_baseTargetSeconds_*`.
+
+Note (latent, separate): `_preservation_violation` builds its `authorized` id set from object keys
+(`asset_id`/`id`/`moment_id`/`target_id`) but the directive payload is a dict of id-lists
+(`opening`/`ending`/`must_include`/`exclude`/`order_*`), so `authorized` is always empty. It did not
+affect this case (the target fix removes the drops entirely) and touching it is a frozen revision-policy
+change — a separate versioned proposal if a directive-named clip ever legitimately needs to move/drop at
+a correct target.
