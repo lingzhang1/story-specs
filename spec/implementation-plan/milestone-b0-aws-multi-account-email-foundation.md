@@ -248,8 +248,13 @@ beta bootstrap + deploy → smoke/security acceptance. The next milestone after 
    FROM `mail.yotale.ai`, apex DMARC `p=none`, Cognito OTP policy on `us-east-1_AzfHOEdA5`. The forwarding
    change is apex-MX + apex-SPF only; it touches NONE of these. (SES MAIL FROM uses the `mail.` subdomain MX,
    no apex collision.)
-3. **Inbound verification — PLANNED gate:** after forwarding is enabled, send a test to each of aws@/beta@/
-   gamma@/prod@ (and aws-security@/aws-billing@/alerts@) and confirm receipt BEFORE any account creation.
+3. **Inbound verification — VERIFIED (2026-10-21):** forwarding destination = `lingzhang.ccny@gmail.com`
+   (owner-confirmed). Namecheap Email Forwarding enabled; all 7 aliases (aws@/beta@/gamma@/prod@/aws-security@/
+   aws-billing@/alerts@) configured → `lingzhang.ccny@gmail.com`. Apex MX (`eforward1-5`) + apex SPF live and
+   propagated (Google 8.8.8.8 + Cloudflare 1.1.1.1). Owner ran the delivery test from a non-destination address
+   (after Namecheap's ~1h mailbox activation) and **confirmed inbound receipt**. SES sending re-verified intact
+   post-change via AWS API: domain verification Success, DKIM enabled+Success (3 tokens), MAIL FROM
+   `mail.yotale.ai` Success (`BehaviorOnMXFailure=UseDefaultValue`). **Phase 1 COMPLETE.**
 4. **Standalone management-account creation — CONFIRMED procedure:** sign up a brand-new standalone AWS
    account at the AWS sign-up page with root email `aws@yotale.ai` (needs a payment method + verified contact);
    from that account enable AWS Organizations (CreateOrganization, FeatureSet=ALL) → it becomes the management
@@ -262,8 +267,19 @@ beta bootstrap + deploy → smoke/security acceptance. The next milestone after 
 6. **Preserve dev account + workloads — HONORED:** nothing in this plan creates, modifies, or deletes anything
    in `989088054552`; the new org/accounts are entirely separate.
 
-### Next action (single blocker)
-Awaiting the **forwarding destination inbox**. On confirmation: enable Namecheap Email Forwarding + add apex
-MX/SPF (sending records untouched), configure the 7 forwards, and verify inbound to every address. Only after
-all verifications + security checks pass do I create AWS accounts (management first, then beta).
-CloudWatch observability + Bedrock cost-accounting implementation.
+### Phase 1 status — COMPLETE (2026-10-21)
+Email receiving is live and verified end-to-end. Destination `lingzhang.ccny@gmail.com`; all 7 admin aliases
+deliver; sending (SES DKIM/MAIL FROM/Cognito OTP) preserved and re-verified intact; dev account untouched.
+
+### Next action (STOP gate — owner go required)
+Phase 1 clears the email prerequisite for AWS account creation. **STOP here per the B0 gate** — account
+creation needs the owner's explicit go plus a payment method + verified phone (console action, owner-credentialed).
+On go, in bounded increments:
+1. Create the standalone **management** account (root `aws@yotale.ai`) → enable Organizations (FeatureSet=ALL),
+   keep it workload-free; set org security contacts; enable IAM Identity Center.
+2. Create the **beta** member account (root `beta@yotale.ai`); create gamma/prod as empty, secured accounts.
+3. Beta SES identity (recommend `beta.yotale.ai`, additive DKIM CNAMEs) + Cognito DEVELOPER mode (same-account).
+4. Beta CDK deploy **by digest** (no `:latest`), fresh data plane (no dev data copied), SQS/DLQ, private media.
+5. Per-account budgets (beta $100 / gamma $50 / prod $100 @ 50/80/100%) + basic CloudWatch.
+6. Smoke + security acceptance.
+Then the next milestone: CloudWatch observability + Bedrock cost-accounting implementation.
