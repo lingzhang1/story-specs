@@ -71,10 +71,13 @@ Two-phase, reservation-first (never charge after the fact only):
   duplicate submit, SQS redelivery, retry, cancel, or worker crash (the marker's `held→released` state guard).
 - **Terminal-state release:** the worker decrements `active_jobs` + refunds/settles on the job's terminal
   transition; a redelivery of a finished job finds the slot already `released` → no double-decrement.
-- **Crash recovery:** a crashed worker leaves `slot#<job_id>=held` + a `reserved` reservation; the reconcile
-  sweep (extend the existing EventBridge reconcile rule) releases both for jobs past their lease with no
-  progress, so a crash cannot permanently leak a slot or a reservation. `active_jobs` can never go negative
-  (release is conditional on `held`).
+- **Crash recovery (IMPLEMENTED):** `JobStore.sweep_quota_orphans()` runs on the existing EventBridge
+  reconcile tick. It finds (a) jobs stuck non-terminal past `expires_at` (a worker that crashed mid-run) and
+  finalizes them `failed(orphaned)`, and (b) terminal jobs not yet `quota_released`; it stamps
+  `quota_released=1` conditionally (EXACTLY-ONCE) and the worker releases each one's reservation + slot
+  (refund allowance, free slot, 0 incurred — a crashed attempt's cost is an accepted under-count). A crash
+  cannot permanently leak a slot or a reservation. `active_jobs` can never go negative (release is conditional
+  on `held`).
 
 ## 4. Configurable beta allowances + global safeguards (req 13)
 
@@ -160,10 +163,12 @@ job no-op; gate inert when unprovisioned. Full suites: **579 backend + 64 CDK gr
 
 ## STOP — Phase 4 provisioning / enforcement
 
-IMPLEMENTED on branch `b0/beta-security-phase4` (NOT yet PR'd per owner; integration + correctness work
-continues there). Beta synth with the pipeline inputs renders the quota additions + preserves observability.
-The **authoritative live `cdk diff story-beta-api`** (with `-c observability=true -c
-alarmDestination=alerts@yotale.ai` + the live digest + cognito ids) is the final additive-only proof — it
-needs a refreshed beta SSO credential (`aws sso login --sso-session yotale`) and is run right before deploy.
-`STORY_QUOTA_MODE` stays **observe** (observe does NOT enforce cost limits — correction 9). No subscriptions,
-billing, or free-tier pricing. No enforcement until separately approved.
+IMPLEMENTED on branch `b0/beta-security-phase4`; integration + crash-recovery complete, so the PR may open.
+**Authoritative live `cdk diff story-beta-api`** (with `-c observability=true -c
+alarmDestination=alerts@yotale.ai` + live digest `sha256:52273f67…` + the beta cognito ids) ran against
+deployed beta and is **PURELY ADDITIVE, zero destroy/replace**: instance role `+UserQuotaReserve`, worker
+role `+UserQuotaSettle` (Get/Update/Transact on `story-beta-user-usage`), worker `+STORY_QUOTA_MODE
++STORY_USER_USAGE_TABLE` env + code-asset hash, App Runner `+6` quota env vars; observability PRESERVED
+(no teardown), no table/Cognito/OIDC/WAF/queue drift (one omitted change is a cosmetic em-dash, Value
+identical). **NOTHING deployed.** `STORY_QUOTA_MODE` stays **observe** (observe does NOT enforce cost limits
+— correction 9). No subscriptions, billing, or free-tier pricing. No enforcement until separately approved.
