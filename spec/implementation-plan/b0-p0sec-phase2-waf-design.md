@@ -90,3 +90,22 @@ No per-user throttling, no AI quotas — those are Phase 3/4 (application-layer,
 ## STOP — awaiting owner approval
 
 Per the directive: **no WAF is provisioned until the owner reviews these rules and costs.** On approval, the next step is authoring `StoryBetaWafStack` + the `story-beta-cfn-exec` policy addition, a synth + an authoritative `cdk diff` (expected additive-only), then STOP again before the actual deploy.
+
+## 10. Owner amendments resolved (2026-10-21) + CDK implementation
+
+Implemented in `infrastructure/cdk/lib/story-beta-waf-stack.ts` (gated `-c deployWaf=true`), 9 synth tests, full CDK suite 56/56 green. Authoritative beta `cdk diff` = **additive-only** (WebACL, Association, LogGroup, LoggingConfiguration, 2 Alarms + bootstrap-version param). No change to App Runner/Cognito/DynamoDB/S3/SQS/Lambda/auth.
+
+- **Rule 5 (body > 2 MB) now COUNT**, not Block, until real request sizes + WAF inspection limits are observed.
+- **Request-body inspection limit (confirmed):** WAFv2 inspects the first 8 KB of a body by default; on App Runner the association supports up to 64 KB with `AssociationConfig`. The size-constraint rule uses `oversizeHandling: CONTINUE` so a body larger than the inspected window is still evaluated by the size rule (it does not silently pass). This is why rule 5 starts in Count — to confirm the AI endpoints' large JSON bodies behave as expected before any blocking.
+- **Presigned S3 preserved:** media bytes never traverse App Runner (API only issues presigned URLs); the WAF cannot touch them. Verified in `media_store`.
+- **SNS reuse (no duplicate, no silent action-less alarms):** the stack imports the Observability topic ARN via `-c wafAlarmTopicArn=`; if absent, synthesis FAILS loudly. It creates no SNS topic. Both alarms carry the imported SNS action (asserted by test).
+- **Least-privilege IAM (no `wafv2:*`):** the WAF stack is a SEPARATE stack deployed through the standard CDK bootstrap CloudFormation execution role — the scoped `story-beta-cfn-exec` role (owned by the api stack) is NOT modified, so the api stack is untouched. If a dedicated scoped WAF-deploy role is later preferred, the minimum actions are: `wafv2:CreateWebACL/GetWebACL/UpdateWebACL/DeleteWebACL`, `wafv2:AssociateWebACL/DisassociateWebACL/ListResourcesForWebACL`, `wafv2:PutLoggingConfiguration/GetLoggingConfiguration/DeleteLoggingConfiguration`, `wafv2:TagResource`, `logs:CreateLogGroup/PutRetentionPolicy/DeleteLogGroup`, `cloudwatch:PutMetricAlarm/DeleteAlarms` — scoped to the beta account/region and the `story-beta-*` resource names where WAFv2 supports resource-level ARNs (WebACL ARN; several wafv2 actions are account/region-scoped only by AWS design).
+- **Logs:** `aws-waf-logs-story-beta`, 30-day retention, `authorization`/`cookie`/`x-api-key` headers redacted.
+- **Count→Block, false-positive review, rollback:** per §4/§6. Break-glass = `aws wafv2 disassociate-web-acl`.
+- **Final cost:** ~$11–14/month (ACL $5 + ~5 rule slots $5 + <$0.60 requests + ~$1–3 logging).
+
+## STOP — final resource/IAM review before provisioning
+
+Deploy command (NOT run yet):
+`cdk deploy story-beta-waf -c deployWaf=true -c environment=beta -c appRunnerServiceArn=<arn> -c wafAlarmTopicArn=<observability topic arn>`
+The Observability SNS topic must exist first (deploy the observability stack to beta, or pass its ARN). Awaiting owner approval of resources + IAM.
