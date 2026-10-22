@@ -140,6 +140,52 @@ CRS sub-rule needs WAF full request logging enabled; the metric is conclusive it
   ListInferenceProfiles, GetUseCaseForModelAccess, etc. all in NotAction). Only the CDK-source backport on
   `feat/r1` remains (live is already correct).
 
+## ENFORCEMENT ACCEPTANCE (owner-approved external-beta thresholds, 2026-10-22)
+
+Owner-approved thresholds: per-user **$8/mo**, **20 gens/day**, **2 active jobs (queued+running)**, global
+**$60/mo**; per-class request-rate thresholds retained. Set in CDK (App Runner + worker env) and the module
+defaults. `STORY_QUOTA_MODE` stays **observe** — NOT flipped (STOP honored).
+
+Pre-enforcement verification (all evidence measured / tested; nothing enforced):
+
+1. **Failed generations settle incurred Bedrock cost** — ledger shows 1 `released` reservation that refunded
+   the allowance while keeping incurred spend; worker `_quota_release_job` records `incurred_usd` from the
+   engine's summed billable tokens on failure. Tests: `test_failed_inference_refunds_allowance_but_keeps_spend`,
+   `test_worker_release_refunds_allowance_keeps_spend`.
+2. **Global + per-user boundaries under concurrency** — `test_concurrent_distinct_users_isolated`,
+   `test_concurrent_same_op_reserves_once`, `test_global_breaker_denies_at_cap_across_users`,
+   `test_slots_concurrent_distinct_jobs_cap_respected`, `test_beta_global_60_trips_before_budget_100`.
+3. **Idempotent retries don't double-charge / double-consume** —
+   `test_duplicate_reservation_is_idempotent_no_double_count`,
+   `test_submit_reserve_helper_reserves_once_and_caps_slots`, `test_slot_reserve_release_exactly_once`.
+4. **App shows useful quota-denial messages** — the 429 body carries `scope`; iOS maps each scope to an honest
+   message (daily/monthly/active-jobs/global) and routes to `quotaReached` (message + Back, no plain retry).
+   The denial SCOPE was made accurate (daily-gens vs monthly-usd vs global) so the right message shows. The
+   503 (accounting outage) maps to a transient "try again in a moment".
+5. **Bounded enforcement tests (429/503/cancel/crash)** — 429: slot-cap + per-user/daily/global boundary
+   tests; 503: `test_submit_reserve_store_error_fails_closed_in_enforce`, `test_store_error_surfaces_as_quota_store_error`;
+   cancellation: `_run_one` cancel release + `test_double_settle_then_release_no_double_move`; crash recovery:
+   `sweep_quota_orphans` tests + `test_orphan_reservation_releasable_after_crash`. No Bedrock load used.
+6. **Rollback restores observe without losing accounting** — the mode is a single env var
+   (`STORY_QUOTA_MODE=observe`), redeploy same digest. The ledger (reservations, settled_usd, markers) is
+   durable DynamoDB data unaffected by the mode flag — observe and enforce read/write the SAME items, so
+   flipping back loses no accounting.
+7. **Reconciled config + authoritative beta CDK diff** — live `cdk diff story-beta-api` (observability flags +
+   live digest + cognito ids) is VALUE-ONLY: `STORY_QUOTA_USER_MONTHLY_USD 5→8`, `_USER_DAILY_GENS 40→20`,
+   `_MAX_ACTIVE_JOBS 5→2`, `_GLOBAL_MONTHLY_USD 60` (unchanged), + worker code-asset hash. NO IAM change, NO
+   destroy/replace, observability PRESERVED, `STORY_QUOTA_MODE` NOT in the diff (stays observe).
+
+### FINAL enforcement proposal (apply together on owner GO; each reversible)
+
+| Flip | Recommendation | How | Rollback |
+|---|---|---|---|
+| `STORY_THROTTLE_MODE=enforce` | **GO** | env flip + redeploy (same digest) | env → observe, redeploy |
+| `STORY_QUOTA_MODE=enforce` ($8 / 20 / 2 / $60) | **GO** | env flip + the value-only threshold deploy above | env → observe, redeploy (ledger intact) |
+| WAF **rate rule** Count→Block | **GO** | WAF rule action Count→Block | set rule back to Count |
+| WAF **CRS** Count→Block | **HOLD** | — | keep Count; tune the false-positive sub-rule first |
+
+STOP: no mode flipped, nothing deployed. The threshold deploy + the two enforce flips go in one change on GO.
+
 ## Appendix — "Create Another Version" infeasible (job `3cff789c…`, root-caused 2026-10-22)
 
 NOT a defect. The job reached the planner (3 Opus calls, ~3 min, 2 repair passes) and the validator rejected
