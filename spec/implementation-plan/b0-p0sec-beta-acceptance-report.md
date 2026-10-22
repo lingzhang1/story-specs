@@ -199,3 +199,22 @@ constraint (drop order_after, or unpin opening/ending, or fewer must-include), o
 Version with no directives. A separate NON-FATAL bug was fixed while investigating: the orphan-reservation
 sweep's Scan used the DynamoDB reserved keyword `owner` without an alias (ValidationException, caught/logged,
 sweep no-opped) — fixed with an ExpressionAttributeNames alias.
+
+## ENFORCEMENT ACCEPTED — Phase 3 + Phase 4 CLOSED (2026-10-22, owner GO)
+
+Deployed to beta and live-verified. Both modes ENFORCE; WAF rate rule BLOCK; CRS stays COUNT.
+
+- **Image digest (immutable):** `sha256:8bbaf4a05ff1809e56809415c84a592a6ca80e327fbcc3c7a181d53860ba6675` (tag `git-de87ba4`)
+- **Worker artifact CodeSha256:** `KzUJkbSRIMsxWkT9JGfSEQnkD9use1bTfWoMEzUAAdI=`
+- **Live env:** `STORY_THROTTLE_MODE=enforce`, `STORY_QUOTA_MODE=enforce`, `STORY_QUOTA_USER_MONTHLY_USD=8`, `STORY_QUOTA_USER_DAILY_GENS=20`, `STORY_QUOTA_MAX_ACTIVE_JOBS=2`, `STORY_QUOTA_GLOBAL_MONTHLY_USD=60`
+- **WAF:** `RateLimitPerIp` = Block (verified live), `CommonRuleSet` = Count (unchanged), IpReputation/KnownBadInputs = Block
+- **Pre-deploy diff:** VALUE/mode-only (observe→enforce x2, thresholds, worker hash) — NO destroy/replace, NO OIDC/Cognito/IAM drift, observability PRESERVED. WAF diff = single RateLimitPerIp Count→Block.
+- **Live checks:** service RUNNING on the digest; `/health` 200; 12 CloudWatch alarms OK (2 INSUFFICIENT_DATA by design, treatMissingData=missing); SNS alerts@ subscription confirmed; QuotaReserved/ThrottleAllowed metrics emitting; no spurious 429/503 on legitimate traffic.
+- **Enforce-path behavior** (429/503/idempotency/slot+orphan recovery) proven by 33 unit+integration tests on the exact enforce code paths; `_run_one` cancel release; `sweep_quota_orphans` crash recovery.
+
+### ROLLBACK (each independent, ledger-safe)
+- **Quota/Throttle → observe:** redeploy `story-beta-api` with `STORY_THROTTLE_MODE=observe STORY_QUOTA_MODE=observe` (same digest, same cognito/observability flags). The UserUsage ledger is durable DynamoDB, unaffected by the mode flag — no accounting lost.
+- **WAF rate → Count:** redeploy `story-beta-waf` WITHOUT `-c rateBlock=true` (or `-c rateBlock=false`). Break-glass: `aws wafv2 disassociate-web-acl`.
+- **Full app rollback:** redeploy by the PRIOR digest `sha256:ceb8787c…` (tag `git-6edc4c0`, observe-mode release).
+
+Milestone CLOSED. Separately tracked release dependencies: Epidemic credential verification (owner wrote the rotated key to the beta secret; needs one app music action to confirm Epidemic auth), SES production-access case (replied, pending AWS). EditPlan validation review continues separately.
