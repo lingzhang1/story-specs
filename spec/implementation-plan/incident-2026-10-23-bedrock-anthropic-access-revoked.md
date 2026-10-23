@@ -96,22 +96,35 @@ All three Bedrock-calling identities are **expected**:
 
 ## 3. Most probable trigger (hypothesis, NOT established fact)
 
+**Owner observation (2026-10-23, material):** today's testing created **no stories and uploaded no
+personal videos/photos.** Confirmed in code: the stages that send image bytes to Anthropic
+(`asset_engine` Asset Understanding, `scene_understanding`, multimodal `edit_planner`) run **only** on
+story creation with uploaded media — so they **did not execute today**. Today's traffic was the
+**text-only** StoryGuide path: `story_guide`/`story_guide_v2`/`story_guide_refine` build their
+`StructuredRequest` with **no `images=`** (text-only), and the `scene_image` path makes **zero Bedrock
+calls** — it calls the **Unsplash HTTP API** for image metadata/URLs that are hotlinked to the device;
+**no Unsplash/online image byte ever passes through any Bedrock/Anthropic model.**
+
+Consequence: **an online (Unsplash) image could not have triggered this** — online images never reach a
+model. The flag therefore comes from **historical** image traffic, not today's work. The only
+image-bearing Anthropic traffic in this account's history is **first-party user/test media** from
+earlier sessions where videos *were* uploaded (e.g. the girl_with_dress / hiking / guitar test
+datasets, device test runs, multimodal contact-sheet experiments). Anthropic's offline detection
+reviews **retained traffic over up to 30 days** per the doc, which is consistent with a historical
+trigger landing as a revocation today.
+
 The official abuse-detection doc is explicit that (a) CSAM detection runs on **image inputs/outputs**
 across models, and (b) for some Anthropic model classes **all traffic is retained up to 30 days and
-classifier-flagged traffic is human-reviewed**. The YoTale pipeline sends **users' own personal photos
-and video frames** to Anthropic image-capable models in three stages:
-- `asset_engine` (Asset Understanding) — 24 JPEG frames per Moment of the user's own video;
-- `scene_understanding` — live scene frames;
-- `edit_planner` (multimodal) — per-Moment contact-sheet JPEGs.
-
-Given that this is the only image-bearing Anthropic traffic, and the restriction is Anthropic-specific,
-the **most likely trigger class is Anthropic's image/content classifier flagging ordinary
-personal-event imagery (people at weddings/trips/birthdays) — most plausibly a false positive**. A
-secondary candidate is high-volume automated A/B/test traffic reading as rate-abuse.
+classifier-flagged traffic is human-reviewed**. Given the restriction is Anthropic-specific and the
+only Anthropic image traffic is first-party test media, the **most likely trigger class is Anthropic's
+image/content classifier flagging ordinary personal-event imagery (people at weddings/trips/hikes) from
+an EARLIER session — most plausibly a false positive**. A secondary candidate is historical
+high-volume automated A/B/test traffic reading as rate-abuse.
 
 **This is a hypothesis.** We **cannot establish which specific content or request was flagged**: AWS
-does not share the flagged content, and no model-invocation logging was enabled to reconstruct it
-independently. The audit does **not** guess further, and recommends **no prompt change made solely to
+does not share the flagged content, and model-invocation logging was not enabled at the time of the
+incident (it has since been enabled metadata-only — see §6.1 — which helps only from now on, not
+retroactively). The audit does **not** guess further, and recommends **no prompt change made solely to
 evade detection**.
 
 ---
@@ -152,9 +165,14 @@ evade detection**.
 ## 6. Recommended safeguards (address evidenced risk only; req 9)
 
 Evidenced gaps, not speculation:
-1. **Enable Bedrock model-invocation logging** (to a private, access-controlled S3/CloudWatch sink) so
-   a future incident has customer-side diagnostics. *(Owner decision — a config change, deliberately
-   NOT made in this read-only audit.)*
+1. **Enable Bedrock model-invocation logging** — **DONE (2026-10-23, owner-approved).** CloudWatch log
+   group `/bedrock/model-invocation-logging` (90-day retention) + least-privilege service role
+   `bedrock-logging-cw-role` (scoped to that one log stream). Configured **METADATA ONLY** —
+   `textDataDeliveryEnabled`/`imageDataDeliveryEnabled`/`embeddingDataDeliveryEnabled`/
+   `videoDataDeliveryEnabled` all **false**, so **no prompt/response/image bodies are stored** (no new
+   store of user content). Gives invocation-level diagnostics from now on; does NOT help retroactively
+   for this incident. This single IAM role was created under explicit owner approval, overriding the
+   audit's no-IAM boundary for this action only.
 2. **Pass Anthropic's usage policies through to end users** in the YoTale ToS/EULA (the Bedrock
    third-party-model agreement expects this).
 3. **Rate-limit + de-duplicate experiment/test loops** against Bedrock (quota infra already exists; the
