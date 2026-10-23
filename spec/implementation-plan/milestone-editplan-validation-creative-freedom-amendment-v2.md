@@ -236,3 +236,99 @@ All flags default off → merge is inert. Enable in dev first behind flags; run 
 
 ## Architecture gate
 **STOP for owner architecture approval before any implementation or deployment.** No code changed, no prompt/contract touched, nothing pushed. Out-of-scope systems (auth, quotas, WAF, R7 sync, billing, production infra) untouched. On approval: land Phase-2/3 behind the flags above and run the Phase-4 regression matrix (incl. the 47.5s 4-directive fixture, the TMB create/revise cases, and the contradictory/unavailable/strict-ordering/duration-pressure/mixed/safety-exclude cases) before any device gate.
+
+---
+
+## FINAL APPROVED POLICY (owner conditional approval, 2026-10-22) — implemented
+
+The owner conditionally approved v2 with three corrections, now folded in and implemented behind the flags
+(STOP is now **before DEPLOYMENT**, not before implementation):
+
+### A. Strict cost-aware repair policy (owner §7) — **default ZERO additional model repair calls**
+Repair priority is deterministic-first, then retain-and-deliver, then fail, and only last a targeted model
+repair — and only when no valid meaningful candidate exists and the defect is technically recoverable:
+| Operation | Max additional model repair calls | Condition |
+|---|---|---|
+| Revise | **0** | exception: **1** only to recover an otherwise-unrenderable HARD technical defect |
+| Create / Create Another Version | **1** | only if HARD errors remain AND no valid candidate is already retained |
+| (any) | **never ≥2** | no automatic second/third Opus attempt |
+| (any) | **0 for purely creative/objective deviations** | objectives are scored + disclosed, never repaired |
+Once a technically-valid candidate is retained, the loop **does not** spend a model call to chase editorial
+compliance (`repair_skipped_have_valid`). `diag.repair_budget` records the ceiling in force. Repairs carry
+**only the HARD errors**. Smaller-model routing for cheap technical repairs is noted as a future lever but is
+**not changed here** (would need regression evidence first, per §7).
+
+### B. Conservative safety/privacy exclude (owner §3) — **fail safe, do not assume creative**
+A missing marker does **NOT** mean an exclusion is creative. `_exclude_is_safety` treats an exclude as a
+SAFETY/PRIVACY prohibition (HARD, never silently violated) **unless it is unambiguously marked creative**
+(`exclude_creative:[ids]` or `exclude_reason:{id:'creative'}`); an id marked `privacy`/`safety`/`sensitive`/
+`person`/`face` (the client's privacy controls) is hard; and an **unresolved** id defaults to SAFETY. A single
+escape hatch flag `STORY_EDITPLAN_EXCLUDE_DEFAULT_CREATIVE` (default off) exists for a surface that proves its
+excludes are only creative; left off, the fail-safe default stands.
+
+### C. Preserve AI creative freedom (owner §5) — **no deterministic montage substitution**
+Deterministic processing is used ONLY for the existing safe transforms — technical normalization, mechanical
+retime, unambiguous **reorder** of the SAME segments, and explicit mechanical revisions. Initial creation and
+Create Another Version still go to the model for editorial selection/pacing/storytelling; nothing replaces
+creative generation with a generic montage to cut cost. The deterministic reorder only reassigns `order`; it
+never selects or drops footage.
+
+### Exact changed files
+- `packages/edit_planner/__init__.py` — v2 flags; `validate_plan` approximate-duration-soft branch +
+  `DURATION_RUNAWAY_GUARD`; `_validate_directives_split` (hard vs objective) + `_validate_directives`
+  back-compat wrapper; `_exclude_is_safety`; `assess_creative_intent` + `_objective_code`; `generate()`
+  best-valid retention, placement-subset deterministic reorder, strict per-operation repair budget,
+  partial-success disclosure; `__all__` exports.
+- `apps/api/app/worker.py` — forward `completion` / `partial_disclosure` / `material_unmet` /
+  `creative_satisfaction` / `shipped_retained_candidate` / `structural_repair` / `repair_budget` into
+  `diag_out` so the device renders success-with-note, not the Adjust error.
+- `apps/api/tests/test_edit_planner.py` — 14 new `test_v2_*` regression tests.
+
+### Hard/soft classification (as implemented)
+HARD = technical/rendering (no-segments, order monotonic, source range/duration, native_audio, speed in
+[0.5,2.0], output-consistency, transition feasibility, music-anchor-without-analysis) + media
+ownership/integrity (unknown/unowned Moment reference, source exceeds Moment duration) + safety/privacy
+(safety-flagged exclude; conservative default) + explicit **exact-duration** bands + degenerate-plan floor +
+directive **contradiction** (fail-fast). OBJECTIVE = opening, ending, must_include placement, order_after,
+order_adjacent, creative exclude, approximate duration, source-outside-useful (nudge).
+
+### Repair routing and call budgets
+Deterministic reorder (0 calls) → retain best-valid → fail-fast on contradictions/unowned media → at most the
+per-operation model-repair budget above, HARD errors only, skipped entirely once a valid candidate exists.
+
+### Test results
+`apps/api` backend suite **ALL GREEN** with flags default-off (legacy behavior byte-unchanged) and with the
+14 new `test_v2_*` cases exercising: legacy-mode hard directive; objective-mode soft opening + scorer;
+unknown-reference stays hard; safety-vs-creative exclude split; missing-marker-defaults-to-safety;
+contradiction stays hard; approximate-duration soft + runaway guard; exact-duration stays hard; the 47.5s
+mis-ordered case ships via reorder (complete, 1 call); partial ships with disclosure at 0 extra calls;
+best-valid retention; Revise zero-repair budget; unrecoverable technical error still fails honestly.
+
+### Playable-output comparison (headline, the 47.5s class)
+Baseline (flags off): mis-ordered opening+ending+include+order → `invalid_after_repair`, **2 model calls, no
+video**. Proposed (flags on): deterministic reorder → `executable`, **1 model call**, `completion=complete`,
+opening/ending/inclusion/ordering all satisfied — **ships a playable video**. (FakeModelGateway harness proof;
+the full real-fixture matrix runs on dev before any device gate.)
+
+### Cost / latency evidence
+Deterministic reorder is 0 Bedrock. Strict budget caps directed-path model calls at ≤1 (Revise 0) vs the
+prior ≤3; best-valid retention converts a class of former `invalid_after_repair` 503s into ships at no extra
+model cost. Live beta observability EMF (`ModelInvocations`, `EstimatedModelCostUSD`, `QueueWaitMs`,
+`WorkerProcessingMs`) is the measurement surface for the dev/beta rollout.
+
+### Feature flags & rollback
+`STORY_EDITPLAN_OBJECTIVE_DIRECTIVES`, `_BEST_VALID_RETENTION`, `_DETERMINISTIC_DIRECTIVE_FIRST` (reserved),
+`_POSITIONAL_PREFLIGHT` (reserved), `_APPROX_DURATION_SOFT`, `_USEFUL_RANGE_SOFT`,
+`_EXCLUDE_DEFAULT_CREATIVE` (escape hatch) — all default **off**; module import/deploy is a no-op until a flag
+is flipped. Rollback = single-flag flip or `git revert` of `packages/edit_planner/` + `worker.py`; no data
+migration, no schema/prompt bump, old clients unaffected.
+
+### Remaining risks
+- Objective-ification could ship a plan missing an instruction → mitigated by the mandatory disclosure
+  (`completion=partial`, `material_unmet`) and the deterministic-first reorder making full satisfaction common.
+- Conservative safety default could block a *creative* exclude the client failed to mark → surfaced as a HARD
+  error with a clear message; the fix is the client marking it creative, never a silent drop.
+- Approximate-duration widening bounded by the runaway guard + exact-duration hard path.
+- Smaller-model repair routing deliberately NOT changed (needs regression evidence).
+
+**STOP before deployment for owner review.** Nothing pushed; auth/quotas/WAF/R7/billing/prod untouched.
