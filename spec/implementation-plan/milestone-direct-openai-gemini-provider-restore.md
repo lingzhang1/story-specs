@@ -201,3 +201,87 @@ confirmation before any real media.
 **Constraints honored:** dev only; no Anthropic routing/bypass; existing infra/egress reused (no NAT); no
 engine/prompt/frozen-contract/iOS/beta-gamma-prod change; secrets never printed; nothing implemented or
 deployed in Phase A.
+
+---
+
+## CLOSURE — DEV COMPLETE, BETA ROLLOUT PENDING (2026-10-24)
+
+Owner accepted the direct OpenAI/Gemini migration for **development**. Live testing confirms all required AI
+operations run through OpenAI/Gemini with **zero Anthropic inference**. Status: **DEV COMPLETE — BETA ROLLOUT
+PENDING** (NOT fully released; beta deploy + device acceptance still required).
+
+### 1. Final model routing (FROZEN for dev)
+
+| Capability | Endpoint | Primary | Fallback |
+|---|---|---|---|
+| Creative Intent | `/v1/creative-intent` | OpenAI `gpt-5.1` | Gemini |
+| Story Guide v1 | `/v1/story-guide` | OpenAI `gpt-5.1` | Gemini |
+| Story Guide v2 | `/v1/story-guide-v2` | OpenAI `gpt-5.1` | Gemini |
+| Story Guide refine | `/v1/story-guide-refine` | OpenAI `gpt-5.1` | Gemini |
+| Story Coverage (v1/v2) | `/v1/story-coverage*` | OpenAI `gpt-5.1` | Gemini |
+| **Scene Understanding** | `/v1/scene-understanding` | **OpenAI `gpt-5.1`** (moved from Gemini) | Gemini |
+| Director / AI Ideas | `/v1/director/initialize` | OpenAI `gpt-5.1` | Gemini |
+| Asset Understanding | `/v1/asset-understanding` | Gemini `gemini-3.8-flash` | OpenAI |
+| EditPlan create/revise/explore | `/v1/edit-plan-jobs` (Lambda) | OpenAI `gpt-5.1` | Gemini |
+| Music Plan | `/v1/music-plan` | OpenAI `gpt-5.1` | Gemini |
+| Music Direction | `/v1/music-direction` | deterministic (no model) | — |
+
+Anthropic is disabled at the router (`make_gateway` refuses `anthropic`/`bedrock-anthropic` and any
+Anthropic-looking model id). Fallback policy unchanged: recoverable (transport/429/5xx) fails over;
+`ProviderPolicyError` (policy/access/auth/4xx) **never** fails over.
+
+### 2. Deployment evidence
+
+- **Final commit:** `8ab2446` (branch `feat/r1-account-ownership-isolation`).
+- **App Runner (story-development-api) running digest:** `sha256:ded7266a03d8a993f7e84e1e007941cc948abda56f1ac527addfbe322e44af43`
+- **EditPlan Lambda (story-development-edit-plan-worker) CodeSha256:** `edSFzUVci86hXib9Hbc+HqQsuE0Ao5rcvZJB8DwRdmg=`
+- **Live env (App Runner):** `STORY_MODEL_PROVIDER=direct`, `STORY_OPENAI_MODEL=gpt-5.1`,
+  `STORY_GEMINI_MODEL=gemini-3.8-flash`, `STORY_GUIDE_V2=1`, `STORY_SCENE_IMAGES=1`. Scene route now carried
+  by the **code default** (no `STORY_ROUTE_SCENE_UNDERSTANDING` env override needed — survives cdk deploy).
+- Commit lineage: `eac8f6b` (adapters) → `cda66c6` (OpenAI max_completion_tokens) → `6153a7c` (Gemini $ref
+  inliner) → `0e1a993` (worker served-model observability) → `cd33203` (durable App Runner env in CDK) →
+  `4780da8` (director+duration routing) → `8ab2446` (scene_understanding → OpenAI).
+
+### 3. Operation-level latency (observed in dev; small sample, NOT a statistical SLA)
+
+| Operation | Provider | Calls (ok) | Latency min–max (avg) |
+|---|---|---|---|
+| Creative Intent | OpenAI | 3 (3) | 0.65–2.8s (1.9s) |
+| Story Guide v1 | OpenAI | 1 (1) | 9.1s |
+| Story Guide v2 | OpenAI | 14 (14) | 12.0–61.4s (23.0s) — one 61s cold outlier |
+| Story Guide refine | OpenAI | 1 (1) | 10.3s |
+| Duration (Sizing) | OpenAI | 2 (2) post-fix | 0.19–3.0s (≈1.1s) |
+| Music Plan | OpenAI | 1 (1) | 3.9s |
+| Asset Understanding (24 frames) | Gemini | 3 (3) | 12.2–22.9s (17.1s) |
+| **Scene Understanding (Gemini, retired)** | Gemini | — | **49.9–132.2s** |
+| **Scene Understanding (OpenAI, current)** | OpenAI | 4 (4) | **1.7–5.0s (≈3s)** |
+| Director / AI Ideas | OpenAI | 4 (4) | 13.2–22.8s (16.1s) |
+| EditPlan worker (create/revise/explore) | OpenAI | several (all) | ~8–15s/job; tokens 3.4k–121k in / 0.2k–6.0k out |
+
+### 4. Scene Understanding routing change (recorded per owner request)
+
+Gemini `gemini-3.8-flash` was **pathologically slow on scene_understanding specifically** — 49.9–132.2s for
+1–3 frames, vs 12–23s for 24-frame asset_understanding on the same model — which timed out the on-device AI
+Ideas flow (scene step precedes the Director call). Routed scene_understanding to **OpenAI primary / Gemini
+fallback** (`8ab2446`). Measured improvement: **50–132s → 2–5s (~20–45×)**; full AI Ideas flow now ~17–23s.
+Same `scene_understanding` contract; no engine/prompt/contract change; env-overridable via
+`STORY_ROUTE_SCENE_UNDERSTANDING`. Owner directive: do NOT revert to Gemini.
+
+### 5. Verification distinction
+
+- **Implemented + dev-verified (live):** every capability above returned a valid structured response on
+  OpenAI/Gemini; EditPlan async create + revise + explore verified through the real SQS → Lambda path
+  (`served_by=gpt-5.1`); zero Anthropic Converse in CloudTrail for the tested window.
+- **Tests:** full backend + CDK suites green (667 backend after the router fix; provider+deps suites green).
+- **NOT verified:** beta environment (independent account/secrets — beta SSO token was expired at closure,
+  so beta provider access is UNCONFIRMED), and real-device TestFlight acceptance.
+
+### 6. Known limitations / unresolved acceptance gaps
+
+- Story Guide v2 has a single 61.4s cold-start outlier (median ~23s) — deferred to the post-beta backlog.
+- Direct-provider cost accounting reports `$0` + `MissingModelPricing=1` (gpt-5.1/gemini not in the Bedrock
+  price table) — token counts ARE captured; a direct price table is deferred.
+- Gemini scene_understanding slowness root cause not investigated (worked around by routing to OpenAI).
+- Beta provider secrets/IAM/eligibility unverified (see beta handoff).
+
+See `milestone-direct-openai-gemini-deferred-eval-backlog.md` for the full post-beta backlog.
