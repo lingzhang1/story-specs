@@ -193,3 +193,40 @@ Japan/SF/TMB/wedding will be captured from the dev backend once the owner lifts 
 No change to Story creation, Customize, EditPlan, media ownership, quotas, WAF, billing, model pricing,
 or R7 architecture. Unsplash provider + approved visual card unchanged. Frozen Guide v1 contract +
 prompt untouched; the refinement contract is an additive versioned extension.
+
+---
+
+## CLOSEOUT UPDATE (2026-10-24) — DEPLOYED + LIVE-VERIFIED ON OPENAI; device build the only open item
+
+The earlier STOP ("nothing deployed; Anthropic access blocked") is **superseded**. The Guide v2.1 backend
+is now deployed to dev and the old blocker is **obsolete**: the direct OpenAI/Gemini provider migration
+retired Anthropic entirely, so Guide generation/refinement no longer calls Bedrock Anthropic at all — the
+"re-enable Anthropic Model Access" ask no longer applies.
+
+**Deployed + live (dev `989088054552`, App Runner `story-development-api`, `STORY_MODEL_PROVIDER=direct`,
+`STORY_GUIDE_V2=1`):** all three routes live in `/openapi.json` — `/v1/story-guide`, `/v1/story-guide-v2`,
+`/v1/story-guide-refine`. Story Guide (all stages) runs on **OpenAI `gpt-5.1`**.
+
+**Live before/after captured (the §8 "live-model before/after" risk — now CLOSED):**
+- BEFORE — `/v1/story-guide-v2` on "Our week in Japan — Tokyo and Kyoto" → 8 event-specific scenes (First
+  steps out of Tokyo station, scramble crossing, ramen counter, train to Kyoto, temple, Kyoto alley at
+  dusk, last look back) — the richer v2 prompt producing recognizable scenes, not a generic template
+  (~19.8s).
+- AFTER — `/v1/story-guide-refine` with scene_01 captured, scene_06 pinned, instruction "we filmed a lot of
+  temples — focus more on the two of us and the food": server-authoritative reconciliation verified —
+  **scene_01 (captured) + scene_06 (pinned) preserved verbatim**; two generic landscape scenes
+  (scene_02/scene_03) **archived**; scene_07 rewritten to include the couple; **new fresh ids scene_09 /
+  scene_10** minted beyond the max ordinal (no id reuse) for the food focus; `changes[]` +
+  `archived_scene_ids` returned (~15.8s).
+
+**Tests:** `test_story_guide_refine.py` 10 passed (captured/pinned preservation, archive, fresh-id minting,
+no-id-reuse, 503 preservation, feature gate). Backend suite green.
+
+**Remaining open item (ONE):** the authoritative **iOS device Xcode build** (sandbox blocks the SwiftData
+macro plugin) + on-device acceptance of the Update-Guide UX (pin toggle, event-context field, refinement
+status). Everything server-side is deployed and verified.
+
+**Minor follow-up (non-blocking):** a probe of `changes[].action` rendered empty via a raw key read — likely
+a field-name nuance in `StoryGuideRefinementResult.changes`; the reconciliation behavior itself (preserve/
+archive/add) is correct and verified. Worth a quick field-name confirm during the iOS wire-up, not a backend
+defect.
